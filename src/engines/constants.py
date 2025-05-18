@@ -56,10 +56,10 @@ def _build_neural_engine(
       embedding_dim = 1024
       num_heads = 8
     case 'local':
-      policy = 'behavioral_cloning'
-      num_layers = 4
-      embedding_dim = 64
-      num_heads = 4
+      policy = 'state_value'
+      num_layers = 8
+      embedding_dim = 256
+      num_heads = 8
     case _:
       raise ValueError(f'Unknown model: {model_name}')
 
@@ -113,7 +113,7 @@ def _build_neural_engine(
 
 
 ENGINE_BUILDERS = {
-    'local': functools.partial(_build_neural_engine, model_name='local', checkpoint_step=50_000),
+    'local': functools.partial(_build_neural_engine, model_name='local', checkpoint_step=1_000_000),
     '9M': functools.partial(
         _build_neural_engine, model_name='9M', checkpoint_step=6_400_000
     ),
