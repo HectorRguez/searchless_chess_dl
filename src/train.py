@@ -75,7 +75,7 @@ def main(argv: Sequence[str]) -> None:
           split='train',
       ),
       log_frequency=10,
-      num_steps=500_000,
+      num_steps=1_000_000,
       ckpt_frequency=50_000,
       save_frequency=100_000,
   )
