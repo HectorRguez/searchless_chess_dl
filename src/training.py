@@ -147,13 +147,19 @@ def train(
     )
 
     if train_config.log_frequency is not None:
-      if step % train_config.log_frequency == 0:
-        logging.info(
-            'step: %d | loss: %f | grad_norm_unclipped: %f',
-            step,
-            jax.device_get(loss),
-            jax.device_get(grad_norm_unclipped),
-        )
+        if step % train_config.log_frequency == 0:
+            logging.info(
+                'step: %d | loss: %f | grad_norm_unclipped: %f',
+                step,
+                jax.device_get(loss),
+                jax.device_get(grad_norm_unclipped),
+            )
+
+        # Extra file logging every 1000 steps (independent of train_config.log_frequency)
+        if step % 1000 == 0:
+            loss_val = jax.device_get(loss)
+            with open("output.txt", "a") as f:
+                f.write(f"step: {step} | loss: {loss_val:.6f}\n")
 
   if train_config.ckpt_frequency is not None:
     checkpoint_manager.close()
