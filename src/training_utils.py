@@ -56,59 +56,39 @@ def replicate(
       array_tree,
   )
 
+
 def make_loss_fn(predictor: constants.Predictor) -> Any:
-    """Returns the loss function for `update_parameters`.
-    
+  """Returns the loss function for `update_parameters`.
+
+  Args:
+    predictor: The predictor to evaluate.
+  """
+
+  def loss_fn(
+      params: hk.Params,
+      sequences: constants.Sequences,
+      mask: constants.LossMask,
+  ) -> jnp.float32:
+    """Returns the loss for the model and the last state.
+
     Args:
-        predictor: The predictor to evaluate.
+      params: The parameters of the model, usually a neural network.
+      sequences: The input of sequences to evaluate. See neural_predictors.py.
+      mask: Mask to apply to the losses. True means the loss will not be
+        computed there.
     """
-    # Get the correct indices from _CHARACTERS
-    W_TOKEN = 29  # 'w' is at index 29 in your _CHARACTERS list
-    B_TOKEN = 11  # 'b' is at index 11 in your _CHARACTERS list
-    
-    def loss_fn(
-        params: hk.Params,
-        sequences: constants.Sequences,
-        mask: constants.LossMask,
-    ) -> jnp.float32:
-        """Returns the loss for the model and the last state."""
-        # Extract the turn token (last token in each sequence)
-        turn_tokens = sequences[:, -1]
-        is_black_turn = (turn_tokens == B_TOKEN)
-        
-        # Get model predictions
-        conditionals = predictor.predict(params=params, targets=sequences, rng=None)
-        
-        # Take the predicted value for the actual move played
-        true_conditionals = jnp.take_along_axis(
-            conditionals, sequences[..., None], axis=-1
-        )[..., 0]
-        
-        # For black's turn, invert the state values (1.0 - value)
-        # Reshape is_black_turn to match true_conditionals dimensions
-        is_black_turn_reshaped = jnp.broadcast_to(
-            is_black_turn[:, None], true_conditionals.shape
-        )
-        
-        # Adjust values based on turn
-        adjusted_conditionals = jnp.where(
-            is_black_turn_reshaped,
-            1.0 - true_conditionals,  # Invert for black's turn 
-            true_conditionals,        # Keep as is for white's turn
-        )
-        
-        # Apply the mask (zero out masked positions)
-        adjusted_conditionals = jnp.where(mask, 0.0, adjusted_conditionals)
-        
-        # Calculate total loss
-        marginals = jnp.sum(adjusted_conditionals, axis=1)
-        
-        # We need to clip to avoid a division by 0 below.
-        seq_lengths = jnp.clip(jnp.sum(1 - mask, axis=1), a_min=1)
-        
-        return -jnp.mean(marginals / seq_lengths)
-    
-    return loss_fn
+    conditionals = predictor.predict(params=params, targets=sequences, rng=None)
+    true_conditionals = jnp.take_along_axis(
+        conditionals, sequences[..., None], axis=-1
+    )[..., 0]
+    true_conditionals = jnp.where(mask, 0.0, true_conditionals)
+    marginals = jnp.sum(true_conditionals, axis=1)
+    # We need to clip to avoid a division by 0 below.
+    seq_lengths = jnp.clip(jnp.sum(1 - mask, axis=1), a_min=1)
+    return -jnp.mean(marginals / seq_lengths)
+
+  return loss_fn
+
 
 def _update_ema(
     ema_value: jnp.float32,

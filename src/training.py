@@ -24,7 +24,6 @@ import haiku as hk
 import jax
 from jax.experimental import mesh_utils
 import jax.random as jrandom
-import jax.numpy as jnp
 import numpy as np
 import optax
 
@@ -149,53 +148,18 @@ def train(
 
     if train_config.log_frequency is not None:
         if step % train_config.log_frequency == 0:
-            # Get the loss value from the device
-            loss_val = jax.device_get(loss)
-            grad_norm_val = jax.device_get(grad_norm_unclipped)
-            
-            # Get predictions for the current batch to check value ranges
-            sample_conditionals = predictor.predict(
-                params=params,
-                targets=sequences,  # Use the current batch
-                rng=None
-            )
-            
-            # Get the values for the actual tokens
-            sample_values = jnp.take_along_axis(
-                sample_conditionals,
-                sequences[..., None],  # Use the current batch
-                axis=-1
-            )[..., 0]
-            
-            # Get min and max values
-            min_val = float(jax.device_get(jnp.min(sample_values)))
-            max_val = float(jax.device_get(jnp.max(sample_values)))
-            
-            # Log with all values in a single statement
             logging.info(
-                'step: %d | loss: %f | grad_norm_unclipped: %f | min_val: %f | max_val: %f',
+                'step: %d | loss: %f | grad_norm_unclipped: %f',
                 step,
-                loss_val,
-                grad_norm_val,
-                min_val,
-                max_val
+                jax.device_get(loss),
+                jax.device_get(grad_norm_unclipped),
             )
-            
-            # Add warning if values exceed expected range
-            if max_val > 1.1:  # Allow a small margin above 1.0
-                logging.warning(
-                    'WARNING: Values significantly exceed 1.0! Max value: %f. '
-                    'This suggests state values may be in [0-100] scale instead of [0-1].',
-                    max_val
-                )
 
-            # Extra file logging every 1000 steps
-            if step % 1000 == 0:
-                with open("output.txt", "a") as f:
-                    f.write(f"step: {step} | loss: {loss_val:.6f} | min_val: {min_val:.6f} | max_val: {max_val:.6f}\n")
-                
-
-        
+        # Extra file logging every 1000 steps (independent of train_config.log_frequency)
+        if step % 1000 == 0:
+            loss_val = jax.device_get(loss)
+            with open("output.txt", "a") as f:
+                f.write(f"step: {step} | loss: {loss_val:.6f}\n")
 
   if train_config.ckpt_frequency is not None:
     checkpoint_manager.close()
