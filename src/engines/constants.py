@@ -56,7 +56,7 @@ def _build_neural_engine(
       embedding_dim = 1024
       num_heads = 8
     case 'local':
-      policy = 'state_value'
+      policy = 'action_value'
       num_layers = 8
       embedding_dim = 256
       num_heads = 8
