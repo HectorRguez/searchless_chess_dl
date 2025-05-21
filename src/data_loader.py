@@ -134,7 +134,7 @@ def build_data_loader(config: config_lib.DataConfig) -> pygrain.DataLoader:
   data_source = bagz.BagDataSource(
       os.path.join(
           os.getcwd(),
-          f'/data/hector/searchless_chess/{config.split}/{config.policy}_data.bag',
+          f'/data/hector/searchless_chess/{config.split}/{config.policy}_data.bag', # Matteo add @401_data.bag',
       ),
   )
 
