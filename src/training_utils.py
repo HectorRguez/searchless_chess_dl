@@ -56,7 +56,6 @@ def replicate(
       array_tree,
   )
 
-
 def make_loss_fn(predictor: constants.Predictor) -> Any:
     """Returns the loss function for `update_parameters`.
     
@@ -72,14 +71,7 @@ def make_loss_fn(predictor: constants.Predictor) -> Any:
         sequences: constants.Sequences,
         mask: constants.LossMask,
     ) -> jnp.float32:
-        """Returns the loss for the model and the last state.
-        
-        Args:
-            params: The parameters of the model, usually a neural network.
-            sequences: The input of sequences to evaluate. See neural_predictors.py.
-            mask: Mask to apply to the losses. True means the loss will not be
-                computed there.
-        """
+        """Returns the loss for the model and the last state."""
         # Extract the turn token (last token in each sequence)
         turn_tokens = sequences[:, -1]
         is_black_turn = (turn_tokens == B_TOKEN)
@@ -92,52 +84,29 @@ def make_loss_fn(predictor: constants.Predictor) -> Any:
             conditionals, sequences[..., None], axis=-1
         )[..., 0]
         
-        # Check for values exceeding 1.0 (100%)
-        max_value = jnp.max(true_conditionals)
-        # Using jax.lax.cond for conditional execution in a jit-compatible way
-        def error_case(_):
-            # This will raise an error with a clear message
-            return jax.debug.print(
-                "ERROR: Values exceed 1.0 (100%). Maximum value: {}", 
-                max_value, 
-                ordered=True
-            )
-        
-        def normal_case(_):
-            # Continue with normal processing
-            # For black's turn, invert the state values (1.0 - value)
-            # Reshape is_black_turn to match true_conditionals dimensions
-            is_black_turn_reshaped = jnp.broadcast_to(
-                is_black_turn[:, None], true_conditionals.shape
-            )
-            
-            # Adjust values based on turn
-            adjusted_conditionals = jnp.where(
-                is_black_turn_reshaped,
-                1.0 - true_conditionals,  # Invert for black's turn 
-                true_conditionals,        # Keep as is for white's turn
-            )
-            
-            # Apply the mask (zero out masked positions)
-            adjusted_conditionals = jnp.where(mask, 0.0, adjusted_conditionals)
-            
-            # Calculate total loss
-            marginals = jnp.sum(adjusted_conditionals, axis=1)
-            
-            # We need to clip to avoid a division by 0 below.
-            seq_lengths = jnp.clip(jnp.sum(1 - mask, axis=1), a_min=1)
-            
-            return -jnp.mean(marginals / seq_lengths)
-        
-        # Execute the check
-        result = jax.lax.cond(
-            max_value > 1.0,
-            error_case,
-            normal_case,
-            operand=None
+        # For black's turn, invert the state values (1.0 - value)
+        # Reshape is_black_turn to match true_conditionals dimensions
+        is_black_turn_reshaped = jnp.broadcast_to(
+            is_black_turn[:, None], true_conditionals.shape
         )
         
-        return result
+        # Adjust values based on turn
+        adjusted_conditionals = jnp.where(
+            is_black_turn_reshaped,
+            1.0 - true_conditionals,  # Invert for black's turn 
+            true_conditionals,        # Keep as is for white's turn
+        )
+        
+        # Apply the mask (zero out masked positions)
+        adjusted_conditionals = jnp.where(mask, 0.0, adjusted_conditionals)
+        
+        # Calculate total loss
+        marginals = jnp.sum(adjusted_conditionals, axis=1)
+        
+        # We need to clip to avoid a division by 0 below.
+        seq_lengths = jnp.clip(jnp.sum(1 - mask, axis=1), a_min=1)
+        
+        return -jnp.mean(marginals / seq_lengths)
     
     return loss_fn
 
