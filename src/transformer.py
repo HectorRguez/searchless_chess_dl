@@ -126,12 +126,12 @@ class MultiHeadDotProductAttention(hk.Module):
     attention *= 1.0 / jnp.sqrt(self._num_hiddens_per_head)
 
     # Postional bias  
-    # position_bias = hk.get_parameter(
-    #     'position_bias',
-    #     shape=(self._num_heads, 77 + 2, 77 + 2),
-    #     init=hk.initializers.RandomNormal(stddev=0.02),
-    # )
-    # attention += position_bias[None, :, :, :] 
+    position_bias = hk.get_parameter(
+        'position_bias',
+        shape=(self._num_heads, 77 + 2, 77 + 2),
+        init=hk.initializers.RandomNormal(stddev=0.02),
+    )
+    attention += position_bias[None, :, :, :] 
 
     if mask is not None:
       attention = jnp.where(mask, attention, jnp.finfo(jnp.float32).min)

@@ -95,7 +95,7 @@ def _build_neural_engine(
       checkpoint_dir=checkpoint_dir,
       params=predictor.initial_params(
           rng=jrandom.PRNGKey(1),
-          targets=np.ones((1, 1), dtype=np.uint32),
+          targets=np.ones((1, 79), dtype=np.uint32),
       ),
       step=checkpoint_step,
   )

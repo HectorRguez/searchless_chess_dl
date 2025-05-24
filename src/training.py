@@ -57,7 +57,7 @@ def train(
   logging.info('Initializing the predictor parameters.')
   params = predictor.initial_params(
       rng=jrandom.PRNGKey(predictor_config.seed),
-      targets=np.zeros((1, 1), dtype=np.uint32),
+      targets=np.zeros((1, 79), dtype=np.uint32),
   )
 
   params_ema = copy.deepcopy(params)
