@@ -167,6 +167,105 @@ class SmolgenModule(hk.Module):
 
     return supplemental_logits
 
+class ConvSmolgenModule(hk.Module):
+  def __call__(self, inputs: jax.Array) -> jax.Array:
+    """
+    inputs: [batch, 79, embed_dim] where:
+    - inputs[:, 0, :] = special token (ignore or use separately)
+    - inputs[:, 1:65, :] = 64 board squares (8x8 grid)
+    - inputs[:, 65:79, :] = castling, en passant, etc. (global features)
+    """
+    batch_size, sequence_length, embedding_dim = inputs.shape
+    
+    # Split the input into components
+    board_tokens = inputs[:, 1:65, :]  # [batch, 64, embed_dim] - chess board
+    global_tokens = inputs[:, 65:79, :] # [batch, 14, embed_dim] - game state
+    
+    # Process board spatially with CNN
+    board_features = self._process_board_cnn(board_tokens)
+    
+    # Process global information with standard layers
+    global_features = self._process_global_features(global_tokens)
+    
+    # Combine both feature types
+    combined_features = jnp.concatenate([board_features, global_features], axis=-1)
+    
+    # Generate position summary
+    position_summary = hk.Linear(self._summary_dim)(combined_features)
+    position_summary = jnn.silu(position_summary)
+    
+    # Step 2: Generate head-specific attention logits
+    # Get shared weight matrix (shared across all layers and heads)
+    shared_projection = hk.get_parameter(
+        "shared_projection",
+        shape=(self._summary_dim, self._sequence_length * self._sequence_length),
+        init=hk.initializers.RandomNormal(stddev=0.02),
+    )
+
+    supplemental_logits_all = []
+    for head_idx in range(self._num_heads):
+      # Head-specific transformation of position summary
+      head_summary = hk.Linear(
+          self._summary_dim, 
+          with_bias=True, 
+          name=f"head_{head_idx}_projection"
+      )(position_summary)
+      head_summary = jnn.silu(head_summary)
+      # Shape: [batch, summary_dim]
+
+      # Generate supplemental attention logits using shared projection
+      head_logits = jnp.dot(head_summary, shared_projection)
+      # Shape: [batch, seq_len * seq_len]
+
+      # Reshape to attention matrix
+      head_logits = jnp.reshape(
+          head_logits, (batch_size, self._sequence_length, self._sequence_length)
+      )
+      # Shape: [batch, seq_len, seq_len]
+
+      supplemental_logits_all.append(head_logits)
+
+    # Stack all heads
+    supplemental_logits = jnp.stack(supplemental_logits_all, axis=1)
+    # Shape: [batch, num_heads, seq_len, seq_len]
+
+    return supplemental_logits
+
+
+  def _process_board_cnn(self, board_tokens: jax.Array) -> jax.Array:
+    """Process 64 board squares with CNN."""
+    batch_size = board_tokens.shape[0]
+    
+    # Reshape to 8x8 spatial format
+    spatial_board = jnp.reshape(board_tokens, (batch_size, 8, 8, -1))
+    
+    # Apply convolutional layers
+    h = spatial_board
+    for i, channels in enumerate(self._conv_channels):
+      h = hk.Conv2D(
+          output_channels=channels,
+          kernel_shape=3,
+          padding='SAME',
+          name=f"board_conv_{i}"
+      )(h)
+      h = jnn.relu(h)
+    
+    # Global average pooling
+    board_summary = jnp.mean(h, axis=(1, 2))  # [batch, final_channels]
+    return board_summary
+
+  def _process_global_features(self, global_tokens: jax.Array) -> jax.Array:
+    """Process castling, en passant, etc. with standard layers."""
+    # Flatten global features
+    flattened = jnp.reshape(global_tokens, (global_tokens.shape[0], -1))
+    
+    # Process with MLP
+    h = hk.Linear(256, name="global_dense1")(flattened)
+    h = jnn.relu(h)
+    h = hk.Linear(128, name="global_dense2")(h)
+    h = jnn.relu(h)
+    
+    return h  # [batch, 128]
 
 class MultiHeadDotProductAttention(hk.Module):
   """Multi-head dot-product attention with optional Smolgen enhancement."""
