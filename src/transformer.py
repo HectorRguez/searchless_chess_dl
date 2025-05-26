@@ -64,14 +64,112 @@ class TransformerConfig:
   apply_qk_layernorm: bool = False
   # Whether to apply post LN after attention + MLP blocks
   apply_post_ln: bool = True
+  # Whether to use Smolgen for dynamic attention biases. IMPORTANT: It is using Smolgen by default!!
+  use_smolgen: bool = True
+  # Compression dimension for Smolgen position summary.
+  smolgen_compress_dim: int = 32
+  # Position summary dimension for Smolgen.
+  smolgen_summary_dim: int = 256
 
   def __post_init__(self):
     if self.output_size is None:
       self.output_size = self.vocab_size
 
 
+class SmolgenModule(hk.Module):
+  """Smolgen module for generating dynamic positional attention biases."""
+
+  def __init__(
+      self,
+      num_heads: int,
+      sequence_length: int = 64,
+      compress_dim: int = 32,
+      summary_dim: int = 256,
+      name: str | None = None,
+  ) -> None:
+    """Initializes the Smolgen module.
+
+    Args:
+      num_heads: Number of attention heads.
+      sequence_length: Length of input sequence (64 for chess).
+      compress_dim: Dimension to compress each token to.
+      summary_dim: Dimension of the position summary vector.
+      name: Name of the module.
+    """
+    super().__init__(name=name)
+    self._num_heads = num_heads
+    self._sequence_length = sequence_length
+    self._compress_dim = compress_dim
+    self._summary_dim = summary_dim
+
+  def __call__(self, inputs: jax.Array) -> jax.Array:
+    """Generates supplemental attention logits from input representations.
+
+    Args:
+      inputs: Input token representations of shape [batch, seq_len, embed_dim].
+
+    Returns:
+      Supplemental attention logits of shape [batch, num_heads, seq_len, seq_len].
+    """
+    batch_size, sequence_length, embedding_dim = inputs.shape
+
+    # Step 1: Compress position representation
+    # Project each token to compress_dim
+    compressed = hk.Linear(self._compress_dim, with_bias=False, name="compress")(inputs)
+    # Shape: [batch, seq_len, compress_dim]
+
+    # Flatten to single vector per position
+    flattened = jnp.reshape(compressed, (batch_size, sequence_length * self._compress_dim))
+    # Shape: [batch, seq_len * compress_dim]
+
+    # Dense layer to extract position summary
+    position_summary = hk.Linear(
+        self._summary_dim, with_bias=True, name="position_dense"
+    )(flattened)
+    # Apply activation
+    position_summary = jnn.silu(position_summary)
+    # Shape: [batch, summary_dim]
+
+    # Step 2: Generate head-specific attention logits
+    # Get shared weight matrix (shared across all layers and heads)
+    shared_projection = hk.get_parameter(
+        "shared_projection",
+        shape=(self._summary_dim, self._sequence_length * self._sequence_length),
+        init=hk.initializers.RandomNormal(stddev=0.02),
+    )
+
+    supplemental_logits_all = []
+    for head_idx in range(self._num_heads):
+      # Head-specific transformation of position summary
+      head_summary = hk.Linear(
+          self._summary_dim, 
+          with_bias=True, 
+          name=f"head_{head_idx}_projection"
+      )(position_summary)
+      head_summary = jnn.silu(head_summary)
+      # Shape: [batch, summary_dim]
+
+      # Generate supplemental attention logits using shared projection
+      head_logits = jnp.dot(head_summary, shared_projection)
+      # Shape: [batch, seq_len * seq_len]
+
+      # Reshape to attention matrix
+      head_logits = jnp.reshape(
+          head_logits, (batch_size, self._sequence_length, self._sequence_length)
+      )
+      # Shape: [batch, seq_len, seq_len]
+
+      supplemental_logits_all.append(head_logits)
+
+    # Stack all heads
+    supplemental_logits = jnp.stack(supplemental_logits_all, axis=1)
+    # Shape: [batch, num_heads, seq_len, seq_len]
+
+    return supplemental_logits
+
+
 class MultiHeadDotProductAttention(hk.Module):
-  """Multi-head dot-product attention (Vaswani et al., 2017)."""
+  """Multi-head dot-product attention with optional Smolgen enhancement."""
 
   def __init__(
       self,
@@ -79,6 +177,9 @@ class MultiHeadDotProductAttention(hk.Module):
       num_hiddens_per_head: int,
       name: str | None = None,
       apply_qk_layernorm: bool = False,
+      use_smolgen: bool = False,
+      smolgen_compress_dim: int = 32,
+      smolgen_summary_dim: int = 256,
   ) -> None:
     """Initializes the attention module.
 
@@ -86,13 +187,24 @@ class MultiHeadDotProductAttention(hk.Module):
       num_heads: Number of heads to use.
       num_hiddens_per_head: Number of hidden neurons per head.
       name: Name of the module.
-      apply_qk_layernorm: Applies layernorm to query and key matrices, this
-        helps training stability.
+      apply_qk_layernorm: Applies layernorm to query and key matrices.
+      use_smolgen: Whether to use Smolgen for dynamic attention biases.
+      smolgen_compress_dim: Compression dimension for Smolgen.
+      smolgen_summary_dim: Summary dimension for Smolgen.
     """
     super().__init__(name=name)
     self._num_heads = num_heads
     self._num_hiddens_per_head = num_hiddens_per_head
     self._apply_qk_layernorm = apply_qk_layernorm
+    self._use_smolgen = use_smolgen
+    
+    if self._use_smolgen:
+      self._smolgen = SmolgenModule(
+          num_heads=num_heads,
+          compress_dim=smolgen_compress_dim,
+          summary_dim=smolgen_summary_dim,
+          name="smolgen",
+      )
 
   def __call__(
       self,
@@ -112,26 +224,28 @@ class MultiHeadDotProductAttention(hk.Module):
       k = layer_norm(k)
 
     v = hk.Linear(num_hiddens, with_bias=False)(inputs_kv)
-    # The second (sequence) dimension is undefined since it can differ between
-    # queries and keys/values when decoding. Also checking that the inputs have
-    # the same batch size as the reshape below does not guarantee a failure if
-    # they are different.
+    
     new_shape = (batch_size, -1, self._num_heads, self._num_hiddens_per_head)
     q = jnp.reshape(q, new_shape)
     k = jnp.reshape(k, new_shape)
     v = jnp.reshape(v, new_shape)
 
-    # Let b=batch_size, t=seq_len, h=num_heads, and d=num_hiddens_per_head.
+    # Standard dot-product attention logits
     attention = jnp.einsum('bthd,bThd->bhtT', q, k)
     attention *= 1.0 / jnp.sqrt(self._num_hiddens_per_head)
 
-    # Postional bias  
-    position_bias = hk.get_parameter(
-        'position_bias',
-        shape=(self._num_heads, 77 + 2, 77 + 2),
-        init=hk.initializers.RandomNormal(stddev=0.02),
-    )
-    attention += position_bias[None, :, :, :] 
+    if self._use_smolgen:
+      # Generate dynamic positional attention biases using Smolgen
+      supplemental_logits = self._smolgen(inputs_q)
+      attention += supplemental_logits
+    else:
+      # Original static positional bias
+      position_bias = hk.get_parameter(
+          'position_bias',
+          shape=(self._num_heads, 77 + 2, 77 + 2),
+          init=hk.initializers.RandomNormal(stddev=0.02),
+      )
+      attention += position_bias[None, :, :, :] 
 
     if mask is not None:
       attention = jnp.where(mask, attention, jnp.finfo(jnp.float32).min)
@@ -242,6 +356,9 @@ def _attention_block(inputs: jax.Array, config: TransformerConfig) -> jax.Array:
       num_heads=config.num_heads,
       num_hiddens_per_head=config.embedding_dim // config.num_heads,
       apply_qk_layernorm=config.apply_qk_layernorm,
+      use_smolgen=config.use_smolgen,
+      smolgen_compress_dim=config.smolgen_compress_dim,
+      smolgen_summary_dim=config.smolgen_summary_dim,
   )
   return block(inputs_q=inputs, inputs_kv=inputs, mask=causal_mask)
 
@@ -257,6 +374,7 @@ def transformer_decoder(
   Main changes to the original Transformer decoder:
   - Using gating in the MLP block, with SwiGLU activation function.
   - Using normalization before the attention and MLP blocks.
+  - Optional Smolgen for dynamic positional attention biases.
 
   Args:
     targets: The integer target values, shape [B, T].
