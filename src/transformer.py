@@ -28,6 +28,7 @@ import numpy as np
 from searchless_chess.src import constants
 
 import os
+import os
 
 class PositionalEncodings(enum.Enum):
   SINUSOID = enum.auto()
@@ -506,6 +507,8 @@ def _mlp_block(inputs: jax.Array, config: TransformerConfig) -> jax.Array:
 
 def _attention_block(inputs: jax.Array, config: TransformerConfig, layer_idx: int = 0, log_file=None) -> jax.Array:
   """Attention block for the Transformer with e4 attention printing."""
+def _attention_block(inputs: jax.Array, config: TransformerConfig, layer_idx: int = 0, log_file=None) -> jax.Array:
+  """Attention block for the Transformer with e4 attention printing."""
   batch_size, sequence_length = inputs.shape[:2]
   if config.use_causal_mask:
     causal_mask = np.tril(
@@ -513,6 +516,107 @@ def _attention_block(inputs: jax.Array, config: TransformerConfig, layer_idx: in
     )
   else:
     causal_mask = None
+  
+  # Create a custom attention module that prints e4 attention
+  class E4AttentionPrinter(hk.Module):
+    def __init__(self, num_heads, num_hiddens_per_head, apply_qk_layernorm, layer_idx, log_file=None):
+        super().__init__()
+        self._num_heads = num_heads
+        self._num_hiddens_per_head = num_hiddens_per_head
+        self._apply_qk_layernorm = apply_qk_layernorm
+        self._layer_idx = layer_idx
+        self._log_file = log_file
+
+    def __call__(self, inputs_q, inputs_kv, mask=None):
+      batch_size, sequence_length, embedding_size = inputs_q.shape
+
+      num_hiddens = self._num_hiddens_per_head * self._num_heads
+      q = hk.Linear(num_hiddens, with_bias=False)(inputs_q)
+      k = hk.Linear(num_hiddens, with_bias=False)(inputs_kv)
+
+      if self._apply_qk_layernorm:
+        q = layer_norm(q)
+        k = layer_norm(k)
+
+      v = hk.Linear(num_hiddens, with_bias=False)(inputs_kv)
+      
+      new_shape = (batch_size, -1, self._num_heads, self._num_hiddens_per_head)
+      q = jnp.reshape(q, new_shape)
+      k = jnp.reshape(k, new_shape)
+      v = jnp.reshape(v, new_shape)
+
+      # Compute attention logits
+      attention = jnp.einsum('bthd,bThd->bhtT', q, k)
+      attention *= 1.0 / jnp.sqrt(self._num_hiddens_per_head)
+
+      # Add positional bias
+      position_bias = hk.get_parameter(
+          'position_bias',
+          shape=(self._num_heads, 77 + 2, 77 + 2),
+          init=hk.initializers.RandomNormal(stddev=0.02),
+      )
+      attention += position_bias[None, :, :, :] 
+
+      if mask is not None:
+        attention = jnp.where(mask, attention, jnp.finfo(jnp.float32).min)
+
+      # Apply softmax to get attention weights
+      normalized_attention = jnn.softmax(attention)
+
+      # PRINT E4 ATTENTION VALUES HERE
+      # E4 square is at position 36 in the sequence (1 + 35, where 35 is 4*8+3)
+      # But let's be more flexible and find the right position
+      self._print_e4_attention(normalized_attention, sequence_length)
+
+      # Continue with normal attention computation
+      output = jnp.einsum('bhtT,bThd->bthd', normalized_attention, v)
+      output = jnp.reshape(output, (batch_size, sequence_length, num_hiddens))
+      return hk.Linear(embedding_size, with_bias=False)(output)
+
+    def _print_e4_attention(self, attention_weights, sequence_length):
+      """Write attention values between e4 and the 64 board squares to file."""
+      # E4 is at chess position (4,3) -> index 4*8+3 = 35 in 8x8 board
+      # In sequence: [special_token] + [64 board squares] + [global features]
+      # So e4 is at position 1+35 = 36 in the sequence
+      e4_position = 36
+      
+      if e4_position >= sequence_length:
+        error_msg = f"Warning: e4 position {e4_position} >= sequence length {sequence_length}"
+        print(error_msg)
+        if self._log_file:
+          self._log_file.write(error_msg + "\n")
+        return
+      
+      batch_size, num_heads, seq_len, _ = attention_weights.shape
+      
+      for head_idx in range(num_heads):
+        # Get attention FROM e4 TO the 64 board squares (positions 1-64)
+        e4_to_board = attention_weights[0, head_idx, e4_position, 1:65]
+        
+        # Get attention FROM the 64 board squares TO e4 (positions 1-64)
+        board_to_e4 = attention_weights[0, head_idx, 1:65, e4_position]
+        
+        # Convert to regular Python lists for easy copying
+        e4_to_board_list = e4_to_board.tolist()
+        board_to_e4_list = board_to_e4.tolist()
+        
+        # Format the output lines
+        e4_to_line = f"L{self._layer_idx}H{head_idx}_E4_TO_BOARD: {e4_to_board_list}"
+        board_to_line = f"L{self._layer_idx}H{head_idx}_BOARD_TO_E4: {board_to_e4_list}"
+        
+        # Append to log.txt file
+        with open("log.txt", "a") as log_file:
+          log_file.write(e4_to_line + "\n")
+          log_file.write(board_to_line + "\n")
+          log_file.flush()  # Ensure immediate write
+          
+        # Write to file if available
+        if self._log_file:
+          self._log_file.write(e4_to_line + "\n")
+          self._log_file.write(board_to_line + "\n")
+          self._log_file.flush()  # Ensure immediate write
+
+  block = E4AttentionPrinter(
   
   # Create a custom attention module that prints e4 attention
   class E4AttentionPrinter(hk.Module):
@@ -648,7 +752,9 @@ def transformer_decoder(
 
   h = embeddings
   for layer_idx in range(config.num_layers):
+  for layer_idx in range(config.num_layers):
     attention_input = layer_norm(h)
+    attention = _attention_block(attention_input, config, layer_idx=layer_idx)  # Pass layer index
     attention = _attention_block(attention_input, config, layer_idx=layer_idx)  # Pass layer index
     h += attention
 
