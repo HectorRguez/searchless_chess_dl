@@ -86,7 +86,7 @@ def _build_neural_engine(
       use_causal_mask=False,
   )
 
-  predictor = transformer.build_transformer_predictor(config=predictor_config)
+  predictor = transformer.build_gnn_transformer_predictor(config=predictor_config)
   checkpoint_dir = os.path.join(
       os.getcwd(),
       f'../checkpoints/{model_name}/{policy}/',

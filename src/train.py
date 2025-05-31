@@ -63,6 +63,10 @@ def main(argv: Sequence[str]) -> None:
       apply_post_ln=True,
       apply_qk_layernorm=False,
       use_causal_mask=False,
+      use_smolgen=True,
+      use_gnn=True,
+      gnn_hidden_dim=128,
+      gnn_num_layers=3,
   )
   train_config = config_lib.TrainConfig(
       learning_rate=1e-4,
@@ -101,7 +105,7 @@ def main(argv: Sequence[str]) -> None:
       build_data_loader=data_loader.build_data_loader,
   )
 
-  predictor = transformer.build_transformer_predictor(predictor_config)
+  predictor = transformer.build_gnn_transformer_predictor(predictor_config)
   evaluator = metrics_evaluator.build_evaluator(predictor, eval_config)
   print(evaluator.step(params=params, step=train_config.num_steps))
 

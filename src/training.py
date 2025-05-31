@@ -47,7 +47,7 @@ def train(
   )
 
   # Build the predictor and the data loader.
-  predictor = transformer.build_transformer_predictor(predictor_config)
+  predictor = transformer.build_gnn_transformer_predictor(predictor_config)
   # For multi-host topologies, we want every process to train on different data,
   # so we need to modify the seed accordingly.
   train_config.data.seed += jax.process_index()
