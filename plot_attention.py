@@ -18,7 +18,7 @@ SVG_PIECE_MAP = {
     'p': 'bP.svg', 'n': 'bN.svg', 'b': 'bB.svg', 'r': 'bR.svg', 'q': 'bQ.svg', 'k': 'bK.svg'   # Black
 }
 
-def load_piece_images(svg_folder='lichess', image_size=128):  # Increased from 64 to 128
+def load_piece_images(svg_folder='lichess', image_size=256):  # Increased from 64 to 128
     """Load and cache piece images from SVG files."""
     piece_images = {}
     
@@ -406,16 +406,13 @@ def create_layer_head_grid(attention_data, attention_type='e4_to_board',
         cmap = plt.cm.get_cmap(colormap)
     
     # Create subplot grid with smaller figure size
-    fig, axes = plt.subplots(max_layer + 1, max_head + 1, figsize=figsize)
+    fig, axes = plt.subplots(max_layer + 1, max_head + 1, figsize=figsize, gridspec_kw={'wspace': -0.7, 'hspace': 0.3})
     
     # Handle single row/column case
     if max_layer == 0:
         axes = axes.reshape(1, -1)
     if max_head == 0:
         axes = axes.reshape(-1, 1)
-    
-    fig.suptitle(f'Attention Patterns: {"E4 → Board" if attention_type == "e4_to_board" else "Board → E4"}',
-                fontsize=14, fontweight='bold')
     
     for layer in range(max_layer + 1):
         for head in range(max_head + 1):
@@ -431,7 +428,7 @@ def create_layer_head_grid(attention_data, attention_type='e4_to_board',
                 im = ax.imshow(board, cmap=cmap, aspect='equal', 
                              vmin=0, vmax=np.max(values), alpha=0.8, zorder=1)
                 
-                # Add checkerboard pattern and pieces
+                # Add checkerboard pattern
                 for i in range(8):
                     for j in range(8):
                         square_color = 'lightgray' if (i + j) % 2 == 0 else 'white'
@@ -439,14 +436,15 @@ def create_layer_head_grid(attention_data, attention_type='e4_to_board',
                                                linewidth=0.5, edgecolor='gray',
                                                facecolor=square_color, alpha=0.2, zorder=0)
                         ax.add_patch(rect)
-                        
-                        # Add pieces with smaller size for grid view
-                        piece_rank = 7 - i  # Convert display row back to chess rank
-                        piece_file = j
-                        piece_symbol = pieces.get((piece_rank, piece_file), '')
-                        
-                        if piece_symbol:
-                            add_piece_to_plot(ax, piece_symbol, j, i, piece_images, size=0.04)
+                
+                # # Add ALL pieces to this subplot
+                # for (piece_rank, piece_file), piece_symbol in pieces.items():
+                #     print(piece_rank, piece_file, piece_symbol)
+                #     # Convert chess coordinates to display coordinates
+                #     # piece_rank is 0-7 (rank 1-8), piece_file is 0-7 (file a-h)
+                #     display_row = 7 - piece_rank  # Flip vertically to match chess board orientation
+                #     display_col = piece_file      # File maps directly to column
+                #     add_piece_to_plot(ax, piece_symbol, display_col, display_row, piece_images)
                 
                 # Highlight e4
                 e4_file = 4  # File 'e' 
@@ -470,7 +468,6 @@ def create_layer_head_grid(attention_data, attention_type='e4_to_board',
             ax.set_xticks([])
             ax.set_yticks([])
     
-    plt.tight_layout()
     return fig
 
 def create_top_squares_analysis(attention_data, attention_type='e4_to_board', top_n=5):
@@ -592,7 +589,7 @@ def main():
     interesting_patterns.sort(key=lambda x: x[1], reverse=True)
     
     # Create detailed plots for top 6 most interesting patterns
-    for i, (key, max_val, variance, att_type) in enumerate(interesting_patterns[:6]):
+    for i, (key, max_val, variance, att_type) in enumerate(interesting_patterns[:10]):
         values = attention_data[key][att_type]
         title = f"{key} - E4 → Board (Max: {max_val:.3f}, Var: {variance:.4f})"
         
@@ -610,5 +607,5 @@ def main():
 
 if __name__ == "__main__":
     # Run main if called directly
-
+    # Run: python plot_attention.py log.txt --fen "r2qkb1r/1b1n1ppp/p2ppn2/1p6/3PP3/1QN1BN2/PPP2PPP/R3K2R w KQkq - 0 10"
     main()
