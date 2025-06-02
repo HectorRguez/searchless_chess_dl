@@ -2,3 +2,4 @@ BayesElo/
 checkpoints/
 lc0/
 Stockfish/
+*.txt
