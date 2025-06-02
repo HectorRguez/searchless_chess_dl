@@ -75,7 +75,6 @@ class TransformerConfig:
     if self.output_size is None:
       self.output_size = self.vocab_size
 
-
 class SmolgenModule(hk.Module):
   """Smolgen module for generating dynamic positional attention biases."""
 
@@ -83,7 +82,6 @@ class SmolgenModule(hk.Module):
       self,
       num_heads: int,
       sequence_length: int = 64,
-      compress_dim: int = 32,
       summary_dim: int = 256,
       name: str | None = None,
   ) -> None:
@@ -92,14 +90,12 @@ class SmolgenModule(hk.Module):
     Args:
       num_heads: Number of attention heads.
       sequence_length: Length of input sequence (64 for chess).
-      compress_dim: Dimension to compress each token to.
       summary_dim: Dimension of the position summary vector.
       name: Name of the module.
     """
     super().__init__(name=name)
     self._num_heads = num_heads
     self._sequence_length = sequence_length
-    self._compress_dim = compress_dim
     self._summary_dim = summary_dim
 
   def __call__(self, inputs: jax.Array) -> jax.Array:
@@ -112,29 +108,80 @@ class SmolgenModule(hk.Module):
       Supplemental attention logits of shape [batch, num_heads, seq_len, seq_len].
     """
     batch_size, sequence_length, embedding_dim = inputs.shape
-
-    # Step 1: Compress position representation
-    # Project each token to compress_dim
-    compressed = hk.Linear(self._compress_dim, with_bias=False, name="compress")(inputs)
-    # Shape: [batch, seq_len, compress_dim]
-
-    # Flatten to single vector per position
-    flattened = jnp.reshape(compressed, (batch_size, sequence_length * self._compress_dim))
-    # Shape: [batch, seq_len * compress_dim]
-
-    # Dense layer to extract position summary
-    position_summary = hk.Linear(
-        self._summary_dim, with_bias=True, name="position_dense"
-    )(flattened)
-    # Apply activation
-    position_summary = jnn.silu(position_summary)
+    
+    # Step 1: Compress position representation using CNN
+    # Extract only the chess board tokens (indices 1-64, corresponding to the 64 squares)
+    board_tokens = inputs[:, 1:65, :]  # Shape: [batch, 64, embed_dim]
+    actual_board_size = board_tokens.shape[1]  # Should be 64, but let's be safe
+    
+    # Reshape to 8x8 grid for CNN processing (64 chess board squares)
+    # Ensure we have exactly 64 tokens for 8x8 grid
+    if actual_board_size != 64:
+        raise ValueError(f"Expected 64 board tokens, got {actual_board_size}")
+    
+    board_2d = jnp.reshape(
+        board_tokens, 
+        (batch_size, 8, 8, embedding_dim)
+    )
+    # Shape: [batch, 8, 8, embedding_dim]
+    
+    # Apply small CNN to extract position summary
+    # First conv layer
+    conv1 = hk.Conv2D(
+        output_channels=64,
+        kernel_shape=3,
+        stride=1,
+        padding="SAME",
+        with_bias=True,
+        name="conv1"
+    )(board_2d)
+    conv1 = jnn.silu(conv1)
+    # Shape: [batch, 8, 8, 64]
+    
+    # Second conv layer with stride 2 for downsampling
+    conv2 = hk.Conv2D(
+        output_channels=128,
+        kernel_shape=3,
+        stride=2,
+        padding="SAME",
+        with_bias=True,
+        name="conv2"
+    )(conv1)
+    conv2 = jnn.silu(conv2)
+    # Shape: [batch, 4, 4, 128]
+    
+    # Third conv layer with stride 2 for further downsampling
+    conv3 = hk.Conv2D(
+        output_channels=256,
+        kernel_shape=3,
+        stride=2,
+        padding="SAME",
+        with_bias=True,
+        name="conv3"
+    )(conv2)
+    conv3 = jnn.silu(conv3)
+    # Shape: [batch, 2, 2, 256]
+    
+    # Global average pooling to get final position summary
+    position_summary = jnp.mean(conv3, axis=(1, 2))
+    # Shape: [batch, 256]
+    
+    # Ensure the output dimension matches summary_dim
+    if position_summary.shape[-1] != self._summary_dim:
+      position_summary = hk.Linear(
+          self._summary_dim, 
+          with_bias=True, 
+          name="summary_projection"
+      )(position_summary)
     # Shape: [batch, summary_dim]
 
     # Step 2: Generate head-specific attention logits
     # Get shared weight matrix (shared across all layers and heads)
+    # Only generate logits for board-to-board interactions
+    board_logits_size = actual_board_size * actual_board_size
     shared_projection = hk.get_parameter(
         "shared_projection",
-        shape=(self._summary_dim, self._sequence_length * self._sequence_length),
+        shape=(self._summary_dim, board_logits_size),
         init=hk.initializers.RandomNormal(stddev=0.02),
     )
 
@@ -150,24 +197,31 @@ class SmolgenModule(hk.Module):
       # Shape: [batch, summary_dim]
 
       # Generate supplemental attention logits using shared projection
-      head_logits = jnp.dot(head_summary, shared_projection)
-      # Shape: [batch, seq_len * seq_len]
+      head_logits_flat = jnp.dot(head_summary, shared_projection)
+      # Shape: [batch, board_logits_size]
 
-      # Reshape to attention matrix
-      head_logits = jnp.reshape(
-          head_logits, (batch_size, self._sequence_length, self._sequence_length)
-      )
-      # Shape: [batch, seq_len, seq_len]
+      # Reshape to board-to-board attention matrix
+      head_logits_board = jnp.reshape(head_logits_flat, (batch_size, actual_board_size, actual_board_size))
+      # Shape: [batch, actual_board_size, actual_board_size]
+      
+      # Pad to full sequence length with zeros for non-board tokens
+      # Create full attention matrix initialized with zeros using actual sequence length
+      head_logits_full = jnp.zeros((batch_size, sequence_length, sequence_length))
+      
+      # Fill in the board-to-board interactions (tokens 1 to 1+actual_board_size)
+      end_idx = 1 + actual_board_size
+      
+      head_logits_full = head_logits_full.at[:, 1:end_idx, 1:end_idx].set(head_logits_board)
+      # Shape: [batch, sequence_length, sequence_length]
 
-      supplemental_logits_all.append(head_logits)
+      supplemental_logits_all.append(head_logits_full)
 
     # Stack all heads
     supplemental_logits = jnp.stack(supplemental_logits_all, axis=1)
     # Shape: [batch, num_heads, seq_len, seq_len]
 
     return supplemental_logits
-
-
+  
 class MultiHeadDotProductAttention(hk.Module):
   """Multi-head dot-product attention with optional Smolgen enhancement."""
 
@@ -201,7 +255,6 @@ class MultiHeadDotProductAttention(hk.Module):
     if self._use_smolgen:
       self._smolgen = SmolgenModule(
           num_heads=num_heads,
-          compress_dim=smolgen_compress_dim,
           summary_dim=smolgen_summary_dim,
           name="smolgen",
       )
