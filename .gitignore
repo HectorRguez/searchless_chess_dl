@@ -2,3 +2,7 @@ BayesElo/
 checkpoints/
 lc0/
 Stockfish/
+*.txt
+*.png
+*.json
+training_loss/
