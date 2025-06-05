@@ -1,0 +1,749 @@
+<html></html>
+  <head>
+    <title>BBC chess engine</title>
+    
+    <!-- favicon -->
+    <link rel="shortcut icon" href="/static/favicon.ico">
+    
+    <!-- JQuery -->
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    
+    <!-- Bootstrap -->
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- chessjs -->
+    <script src="/static/js/chess.js"></script>
+    
+    <!-- chessboardjs -->
+    <link rel="stylesheet" href="/static/css/chessboard-1.0.0.min.css">
+    <script src="/static/js/chessboard-1.0.0.min.js"></script>
+    
+    <!-- Custom Dark Mode Styles -->
+    <style>
+      :root {
+        --bg-primary: #1a1a1a;
+        --bg-secondary: #2d2d2d;
+        --bg-tertiary: #3d3d3d;
+        --text-primary: #ffffff;
+        --text-secondary: #b0b0b0;
+        --text-muted: #888888;
+        --border-color: #444444;
+        --success-color: #28a745;
+        --danger-color: #dc3545;
+        --warning-color: #ffc107;
+        --info-color: #17a2b8;
+        --btn-primary: #007bff;
+        --btn-secondary: #6c757d;
+        --input-bg: #404040;
+      }
+
+      body {
+        background-color: var(--bg-primary) !important;
+        color: var(--text-primary) !important;
+        min-height: 100vh;
+      }
+
+      .card {
+        border-radius: 10px !important;
+        background-color: transparent;
+      }
+
+      .card-body {
+        padding: 2rem !important;
+      }
+
+      .btn-outline-secondary {
+        color: var(--text-primary) !important;
+        border-color: var(--border-color) !important;
+        background-color: var(--bg-secondary) !important;
+        transition: all 0.3s ease !important;
+      }
+
+      .btn-outline-secondary:hover {
+        background-color: var(--bg-tertiary) !important;
+        border-color: var(--text-secondary) !important;
+        color: var(--text-primary) !important;
+        transform: translateY(-1px) !important;
+      }
+
+      .btn-success {
+        background-color: var(--success-color) !important;
+        border-color: var(--success-color) !important;
+        transition: all 0.3s ease !important;
+      }
+
+      .btn-success:hover {
+        background-color: #218838 !important;
+        border-color: #1e7e34 !important;
+        transform: translateY(-1px) !important;
+      }
+
+      .form-control {
+        background-color: var(--input-bg) !important;
+        border-color: var(--border-color) !important;
+        color: var(--text-primary) !important;
+        transition: all 0.3s ease !important;
+      }
+
+      .form-control:focus {
+        background-color: var(--bg-tertiary) !important;
+        border-color: var(--btn-primary) !important;
+        color: var(--text-primary) !important;
+        box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25) !important;
+      }
+
+      .input-group-text {
+        background-color: var(--bg-secondary) !important;
+        border-color: var(--border-color) !important;
+        color: var(--text-primary) !important;
+      }
+
+      /* Status indicator styles */
+      .status-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 20px;
+        font-size: 0.9rem;
+        font-weight: 500;
+        transition: all 0.3s ease;
+      }
+
+      .status-online {
+        background-color: rgba(40, 167, 69, 0.2);
+        color: var(--success-color);
+        border: 1px solid rgba(40, 167, 69, 0.3);
+      }
+
+      .status-offline {
+        background-color: rgba(220, 53, 69, 0.2);
+        color: var(--danger-color);
+        border: 1px solid rgba(220, 53, 69, 0.3);
+      }
+
+      .status-checking {
+        background-color: rgba(255, 193, 7, 0.2);
+        color: var(--warning-color);
+        border: 1px solid rgba(255, 193, 7, 0.3);
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+        animation: pulse 2s infinite;
+      }
+
+      .status-online .status-dot {
+        background-color: var(--success-color);
+      }
+
+      .status-offline .status-dot {
+        background-color: var(--danger-color);
+      }
+
+      .status-checking .status-dot {
+        background-color: var(--warning-color);
+      }
+
+      @keyframes pulse {
+        0% { opacity: 1; }
+        50% { opacity: 0.5; }
+        100% { opacity: 1; }
+      }
+
+      /* Toggle switch styles */
+      .toggle-switch {
+        position: relative;
+        display: inline-block;
+        width: 60px;
+        height: 34px;
+      }
+
+      .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background-color: var(--bg-secondary);
+        transition: .4s;
+        border-radius: 34px;
+        border: 2px solid var(--border-color);
+      }
+
+      .slider:before {
+        position: absolute;
+        content: "";
+        height: 22px;
+        width: 22px;
+        left: 4px;
+        bottom: 4px;
+        background-color: var(--text-secondary);
+        transition: .4s;
+        border-radius: 50%;
+      }
+
+      input:checked + .slider {
+        background-color: var(--text-primary);
+        border-color: var(--text-primary);
+      }
+
+      input:checked + .slider:before {
+        transform: translateX(26px);
+        background-color: var(--bg-primary);
+      }
+
+      input:not(:checked) + .slider {
+        background-color: var(--bg-primary);
+        border-color: var(--text-primary);
+      }
+
+      input:not(:checked) + .slider:before {
+        background-color: var(--text-primary);
+      }
+
+      .color-section {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+        padding: 15px;
+        background-color: var(--bg-secondary);
+        border-radius: 8px;
+        margin-bottom: 20px;
+        border: 1px solid var(--border-color);
+      }
+
+      .color-label {
+        font-weight: 500;
+        min-width: 80px;
+      }
+
+      /* PGN display styling - Lichess style */
+      #pgn {
+        background-color: var(--input-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 5px;
+        padding: 15px;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        font-size: 14px;
+        max-height: 300px;
+        overflow-y: auto;
+        color: var(--text-primary);
+        line-height: 1.4;
+      }
+
+      .move-table {
+        width: 100%;
+        border-spacing: 0;
+      }
+
+      .move-table td {
+        padding: 2px 8px;
+        vertical-align: middle;
+        border-radius: 3px;
+        transition: background-color 0.2s ease;
+      }
+
+      .move-table td:hover {
+        background-color: var(--bg-tertiary);
+        cursor: pointer;
+      }
+
+      .move-number {
+        color: var(--text-muted);
+        font-weight: 600;
+        text-align: right;
+        padding-right: 12px !important;
+        width: 40px;
+      }
+
+      .white-move, .black-move {
+        color: var(--text-primary);
+        font-weight: 500;
+        min-width: 60px;
+      }
+
+      .current-move {
+        background-color: rgba(0, 123, 255, 0.2) !important;
+        border-radius: 3px;
+      }
+
+      /* Game status styling */
+      #status {
+        font-size: 1.1rem;
+        font-weight: 500;
+        padding: 10px 15px;
+        background-color: var(--bg-secondary);
+        border-radius: 8px;
+        border: 1px solid var(--border-color);
+        text-align: center;
+      }
+
+      /* Section headers */
+      .section-header {
+        color: var(--text-primary);
+        font-weight: 600;
+        margin-bottom: 10px;
+        padding-bottom: 5px;
+        border-bottom: 2px solid var(--border-color);
+      }
+
+      /* Improve button spacing */
+      .btn-group .btn {
+        margin-right: 5px;
+      }
+
+      .btn-group .btn:last-child {
+        margin-right: 0;
+      }
+    </style>
+    
+    <!-- Analytics -->
+    <script type="text/javascript">
+      $.post('https://maksimkorzh.pythonanywhere.com/analytics/api/post', {
+        date: new Date,
+        url: window.location.href
+      });
+    </script>
+    
+  </head>
+  <body>
+    <div class="col">
+      <div class="row">
+        <div class="col">
+          <div class="card mt-3">
+            <div class="card-body">
+              <div class="row">
+                <div class="col-6">
+                  <!-- chess board view -->
+                  <div id="chess_board" class="mx-auto mb-3" style="width: 640px;"></div>
+                  
+                  <!-- Game over message overlay -->
+                  <div id="game-over-overlay" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0, 0, 0, 0.9); color: white; padding: 30px; border-radius: 15px; text-align: center; z-index: 1000; border: 2px solid var(--success-color); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);">
+                    <div id="game-over-message" style="font-size: 24px; font-weight: bold; margin-bottom: 20px;"></div>
+                    <button id="new-game-overlay" class="btn btn-success btn-lg">🎮 New Game</button>
+                  </div>
+
+                </div>
+                <div class="col ml-2">
+                  <!-- Server status indicator -->
+                  <div class="mb-3">
+                    <div class="section-header">Server Status</div>
+                    <div id="server-status" class="status-indicator status-checking">
+                      <span class="status-dot"></span>
+                      <span class="status-text">Checking server...</span>
+                    </div>
+                  </div>
+
+                  <!-- Settings -->
+                  <div class="mb-4">
+                    <div class="section-header">Settings</div>
+                    <div class="color-section mb-3">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <div class="d-flex align-items-center">
+                          <span class="color-label mr-3">Play as:</span>
+                          <span class="color-label mr-2">Black</span>
+                          <label class="toggle-switch mr-2">
+                            <input type="checkbox" id="color-toggle" checked>
+                            <span class="slider"></span>
+                          </label>
+                          <span class="color-label">White</span>
+                        </div>
+                        <button id="new_game" class="btn btn-outline-secondary">New Game</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- FEN -->
+                  <div class="mb-4">
+                    <div class="section-header">Position Setup</div>
+                    <div class="input-group">
+                      <input id="fen" type="text" class="form-control" placeholder="Enter FEN string">
+                      <div class="input-group-append">
+                        <button id="set_fen" class="btn btn-success">Set FEN</button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- PGN output -->
+                  <div class="mb-3">
+                    <div class="section-header">Game Notation</div>
+                    <div id="pgn"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+
+<script>
+  // Configuration
+  const API_BASE = 'http://localhost:8080/api';
+  
+  // Server health check
+  function checkServerHealth() {
+    const statusElement = document.getElementById('server-status');
+    const statusText = statusElement.querySelector('.status-text');
+    
+    // Set checking state
+    statusElement.className = 'status-indicator status-checking';
+    statusText.textContent = 'Checking server...';
+    
+    $.ajax({
+      url: `${API_BASE}/health`,
+      type: 'GET',
+      timeout: 5000, // 5 second timeout
+      success: function(data) {
+        if (data && data.status === 'healthy') {
+          statusElement.className = 'status-indicator status-online';
+          statusText.textContent = 'Server online';
+        } else {
+          statusElement.className = 'status-indicator status-offline';
+          statusText.textContent = 'Server offline';
+        }
+      },
+      error: function(xhr, status, error) {
+        statusElement.className = 'status-indicator status-offline';
+        statusText.textContent = 'Server offline';
+        console.log('Health check failed:', status, error);
+      }
+    });
+  }
+
+  // Function to show game over message
+  function showGameOverMessage(message, isCheckmate = false) {
+    const overlay = document.getElementById('game-over-overlay');
+    const messageElement = document.getElementById('game-over-message');
+    
+    messageElement.innerHTML = message;
+    
+    // Change border color based on game result
+    if (isCheckmate) {
+      overlay.style.borderColor = 'var(--success-color)';
+    } else {
+      overlay.style.borderColor = 'var(--warning-color)';
+    }
+    
+    overlay.style.display = 'block';
+  }
+  
+  // Function to hide game over message
+  function hideGameOverMessage() {
+    const overlay = document.getElementById('game-over-overlay');
+    overlay.style.display = 'none';
+  }
+
+  // Handle new game from overlay
+  $('#new-game-overlay').on('click', function() {
+    hideGameOverMessage();
+    $('#new_game').click(); // Trigger the existing new game logic
+  });
+
+  // Check server health on load and every 30 seconds
+  checkServerHealth();
+  setInterval(checkServerHealth, 30000);
+
+  // Handle color toggle
+  $('#color-toggle').on('change', function() {
+    const isWhite = $(this).is(':checked');
+    
+    if (isWhite) {
+      board.orientation('white');
+      window.playerColor = 'white';
+    } else {
+      board.orientation('black');
+      window.playerColor = 'black';
+    }
+    
+    console.log('Playing as:', isWhite ? 'White' : 'Black');
+    
+    // If it's a new game and player chose black, let engine make first move
+    if (!isWhite && game.history().length === 0) {
+      setTimeout(() => {
+        make_move();
+      }, 500);
+    }
+  });
+
+  // make computer move
+  function make_move() {
+    // Send current FEN to get engine move
+    $.ajax({
+      url: `${API_BASE}/get_engine_move`,
+      type: 'POST',
+      contentType: 'application/json',
+      data: JSON.stringify({ fen: game.fen() }),
+      success: function(data) {
+        if (data.success) {
+          // Make the engine move
+          const engineMove = game.move(data.move, { sloppy: true });
+          if (engineMove) {
+            board.position(game.fen());
+            updateStatus();
+          }
+        } else {
+          console.error('Engine move failed:', data.error);
+          if (data.game_over) {
+            console.log('Game over:', data.result);
+          }
+        }
+      },
+      error: function() {
+        console.error('Failed to connect to server for engine move');
+      }
+    });
+  }
+
+  // handle new game button click
+  $('#new_game').on('click', function() {
+    // Hide game over message if visible
+    hideGameOverMessage();
+    
+    // Reset game locally (no server call needed)
+    game.reset();
+    board.position('start');
+    updateStatus();
+    console.log('New game started');
+    
+    // If player is black, let engine make first move
+    const playerColor = window.playerColor || 'white';
+    if (playerColor === 'black') {
+      setTimeout(() => {
+        make_move();
+      }, 500);
+    }
+  });
+  
+  // handle make move button click
+  $('#make_move').on('click', function() {
+    // make computer move
+    make_move();
+  });
+  
+  // handle take back button click
+  $('#take_back').on('click', function() {
+    // take move back
+    game.undo();
+    game.undo();
+    
+    // update board position
+    board.position(game.fen());
+    
+    // update game status
+    updateStatus();
+  });
+  
+  // handle set FEN button click
+  $('#set_fen').on('click', function() {
+    const fen = $('#fen').val();
+    
+    // Set FEN locally
+    if (game.load(fen)) {
+      board.position(game.fen());
+      updateStatus();
+      console.log('FEN loaded successfully');
+    } else {
+      alert('Invalid FEN!');
+    }
+  });
+  
+  // Convert chess notation to use Unicode pieces
+  function convertToUnicodePieces(notation) {
+    const pieceMap = {
+      'K': '♔', 'Q': '♕', 'R': '♖', 'B': '♗', 'N': '♘', 'P': '♙',
+      'k': '♚', 'q': '♛', 'r': '♜', 'b': '♝', 'n': '♞', 'p': '♟'
+    };
+    
+    return notation.replace(/[KQRBNP]/g, function(match) {
+      return pieceMap[match] || match;
+    });
+  }
+
+  // Format moves in Lichess-style two-column table
+  function formatMovesTable(moves) {
+    if (!moves || moves.length === 0) {
+      return '<div style="color: var(--text-muted); font-style: italic; text-align: center; padding: 20px;">No moves yet</div>';
+    }
+
+    let html = '<table class="move-table">';
+    
+    for (let i = 0; i < moves.length; i += 2) {
+      const moveNumber = Math.floor(i / 2) + 1;
+      const whiteMove = moves[i] ? convertToUnicodePieces(moves[i]) : '';
+      const blackMove = moves[i + 1] ? convertToUnicodePieces(moves[i + 1]) : '';
+      
+      html += '<tr>';
+      html += `<td class="move-number">${moveNumber}.</td>`;
+      html += `<td class="white-move">${whiteMove}</td>`;
+      html += `<td class="black-move">${blackMove}</td>`;
+      html += '</tr>';
+    }
+    
+    html += '</table>';
+    return html;
+  }
+
+  // GUI board & game state variables
+  var board = null;
+  var game = new Chess();
+  var $status = $('#status');
+  var $fen = $('#fen');
+  var $pgn = $('#pgn');
+
+  // Initialize player color (default to white)
+  window.playerColor = 'white';
+
+  // on picking up a piece
+  function onDragStart (source, piece, position, orientation) {
+    // do not pick up pieces if the game is over
+    if (game.game_over()) return false
+
+    // only pick up pieces for the player's color
+    const playerColor = window.playerColor || 'white';
+    const isPlayerTurn = (playerColor === 'white' && game.turn() === 'w') || 
+                        (playerColor === 'black' && game.turn() === 'b');
+    
+    if (!isPlayerTurn) return false;
+
+    // only pick up pieces that match the player's color
+    if ((playerColor === 'white' && piece.search(/^b/) !== -1) ||
+        (playerColor === 'black' && piece.search(/^w/) !== -1)) {
+      return false
+    }
+  }
+
+  // on dropping piece
+  function onDrop (source, target) {
+    // Check if it's the player's turn
+    const playerColor = window.playerColor || 'white';
+    const isPlayerTurn = (playerColor === 'white' && game.turn() === 'w') || 
+                        (playerColor === 'black' && game.turn() === 'b');
+    
+    if (!isPlayerTurn) {
+      return 'snapback';
+    }
+
+    // see if the move is legal
+    var move = game.move({
+      from: source,
+      to: target,
+      promotion: 'q' // NOTE: always promote to a queen for example simplicity
+    });
+
+    // illegal move
+    if (move === null) return 'snapback';
+
+    // Update status only (board position will be updated by onSnapEnd)
+    updateStatus();
+
+    // Check if game is over after player move
+    if (game.game_over()) {
+      console.log('Game over after player move');
+      return;
+    }
+
+    // Get engine move after a short delay
+    setTimeout(() => {
+      make_move();
+    }, 250);
+  }
+
+  // update the board position after the piece snap
+  // for castling, en passant, pawn promotion
+  function onSnapEnd () {
+    board.position(game.fen())
+  }
+
+  // update game status
+  function updateStatus () {
+    var status = ''
+
+    var moveColor = 'White'
+    if (game.turn() === 'b') {
+      moveColor = 'Black'
+    }
+
+    // checkmate?
+    if (game.in_checkmate()) {
+      status = 'Game over, ' + moveColor + ' is in checkmate.'
+      
+      // Show checkmate message
+      const winner = moveColor === 'White' ? 'Black' : 'White';
+      setTimeout(() => {
+        alert(`🎉 Checkmate! ${winner} wins the game!`);
+      }, 500);
+    }
+
+    // draw?
+    else if (game.in_draw()) {
+      status = 'Game over, drawn position'
+      
+      // Show draw message
+      setTimeout(() => {
+        alert('🤝 Game drawn!');
+      }, 500);
+    }
+
+    // game still on
+    else {
+      status = moveColor + ' to move'
+
+      // check?
+      if (game.in_check()) {
+        status += ', ' + moveColor + ' is in check'
+      }
+    }
+
+    // update DOM elements (but not board position - that's handled by onSnapEnd and engine moves)
+    $status.html(status)
+    $fen.val(game.fen())
+    
+    // Update PGN with Lichess-style formatting
+    const moves = game.history();
+    $pgn.html(formatMovesTable(moves));
+    
+    // Auto-scroll to bottom of game notation
+    const pgnElement = document.getElementById('pgn');
+    pgnElement.scrollTop = pgnElement.scrollHeight;
+  }
+
+
+  // chess board configuration
+  var config = {
+    draggable: true,
+    position: 'start',
+    onDragStart: onDragStart,
+    onDrop: onDrop,
+    onSnapEnd: onSnapEnd,
+    pieceTheme: 'static/img/chesspieces/lichess/{piece}.svg'
+  }
+  
+  // create chess board widget instance
+  board = Chessboard('chess_board', config)
+
+  
+  
+  // prevent scrolling on touch devices
+  $('#chess_board').on('scroll touchmove touchend touchstart contextmenu', function(e) {
+    e.preventDefault();
+  });
+
+  // update game status
+  updateStatus();
+</script>
