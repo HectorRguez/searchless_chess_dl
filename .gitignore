@@ -6,3 +6,4 @@ Stockfish/
 *.png
 *.json
 training_loss/
+__pycache__/

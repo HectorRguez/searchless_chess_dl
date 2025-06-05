@@ -63,13 +63,14 @@ def main(argv: Sequence[str]) -> None:
       apply_post_ln=True,
       apply_qk_layernorm=False,
       use_causal_mask=False,
+      use_smolgen=True
   )
   train_config = config_lib.TrainConfig(
       learning_rate=1e-4,
       data=config_lib.DataConfig(
           batch_size=4096,
           shuffle=True,
-          worker_count=4,  # 0 disables multiprocessing.
+          worker_count=8,  # 0 disables multiprocessing.
           num_return_buckets=num_return_buckets,
           policy=policy,
           split='train',
