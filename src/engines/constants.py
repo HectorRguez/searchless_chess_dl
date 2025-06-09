@@ -78,12 +78,14 @@ def _build_neural_engine(
       output_size=output_size,
       pos_encodings=transformer.PositionalEncodings.LEARNED,
       max_sequence_length=tokenizer.SEQUENCE_LENGTH + 2,
-      num_heads=num_heads,
-      num_layers=num_layers,
-      embedding_dim=embedding_dim,
+      num_heads=8,
+      num_layers=8,
+      embedding_dim=256,
       apply_post_ln=True,
       apply_qk_layernorm=False,
       use_causal_mask=False,
+      use_smolgen=False,
+      use_bilinear_attention=False
   )
 
   predictor = transformer.build_transformer_predictor(config=predictor_config)
@@ -113,7 +115,7 @@ def _build_neural_engine(
 
 
 ENGINE_BUILDERS = {
-    'local': functools.partial(_build_neural_engine, model_name='local', checkpoint_step=1_000_000),
+    'local': functools.partial(_build_neural_engine, model_name='local', checkpoint_step=100_000),
     '9M': functools.partial(
         _build_neural_engine, model_name='9M', checkpoint_step=6_400_000
     ),

@@ -204,7 +204,7 @@ class MultiHeadDotProductAttention(hk.Module):
               self._num_hiddens_per_head,
               self._num_hiddens_per_head,
           ),
-          init=hk.initializers.VarianceScaling(1.0, "fan_in", "normal"),
+          init=hk.initializers.Identity(gain=0.1),
       )
       attention = jnp.einsum("bthd,hde,bThd->bhtT", q, w_a, k)
     else:

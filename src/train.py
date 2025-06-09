@@ -64,7 +64,7 @@ def main(argv: Sequence[str]) -> None:
       apply_qk_layernorm=False,
       use_causal_mask=False,
       use_smolgen=True,
-      use_bilinear_attention=True
+      use_bilinear_attention=False
   )
   train_config = config_lib.TrainConfig(
       learning_rate=1e-4,
