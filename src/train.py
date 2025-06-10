@@ -69,7 +69,7 @@ def main(argv: Sequence[str]) -> None:
   train_config = config_lib.TrainConfig(
       learning_rate=1e-4,
       data=config_lib.DataConfig(
-          batch_size=4096,
+          batch_size=4095,
           shuffle=True,
           worker_count=8,  # 0 disables multiprocessing.
           num_return_buckets=num_return_buckets,
@@ -77,7 +77,7 @@ def main(argv: Sequence[str]) -> None:
           split='train',
       ),
       log_frequency=10,
-      num_steps=1_000_000,
+      num_steps=100_000,
       ckpt_frequency=50_000,
       save_frequency=100_000,
   )

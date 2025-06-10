@@ -84,7 +84,7 @@ def _build_neural_engine(
       apply_post_ln=True,
       apply_qk_layernorm=False,
       use_causal_mask=False,
-      use_smolgen=False,
+      use_smolgen=True,
       use_bilinear_attention=False
   )
 
