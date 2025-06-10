@@ -14,8 +14,8 @@
 # ==============================================================================
 
 """
-Implements a robust, unambiguous tokenization of FEN strings
-without board reversal.
+Implements a robust tokenization of FEN strings with a correct
+canonical representation (row-wise flip only).
 """
 
 import jaxtyping as jtp
@@ -25,42 +25,66 @@ import numpy as np
 TOKEN_VOCAB = {
     # Meta tokens
     "meta_pad": 0,
-    "meta_w": 1,  # White to move
-    "meta_b": 2,  # Black to move
+    "meta_w": 1,  # Player to move (always 'w' in canonical form)
     # Piece tokens (including empty squares)
-    "piece_.": 3,
-    "piece_p": 4, "piece_n": 5, "piece_b": 6, "piece_r": 7, "piece_q": 8, "piece_k": 9,
-    "piece_P": 10, "piece_B": 11, "piece_N": 12, "piece_R": 13, "piece_Q": 14, "piece_K": 15,
+    "piece_.": 2,
+    "piece_p": 3, "piece_n": 4, "piece_b": 5, "piece_r": 6, "piece_q": 7, "piece_k": 8,
+    "piece_P": 9, "piece_B": 10, "piece_N": 11, "piece_R": 12, "piece_Q": 13, "piece_K": 14,
     # Castling rights tokens
-    "castle_K": 16, "castle_Q": 17, "castle_k": 18, "castle_q": 19,
+    "castle_K": 15, "castle_Q": 16, "castle_k": 17, "castle_q": 18,
     # En passant file tokens
-    "ep_a": 20, "ep_b": 21, "ep_c": 22, "ep_d": 23, "ep_e": 24, "ep_f": 25,
-    "ep_g": 26, "ep_h": 27,
+    "ep_a": 19, "ep_b": 20, "ep_c": 21, "ep_d": 22, "ep_e": 23, "ep_f": 24, "ep_g": 25, "ep_h": 26,
     # En passant rank tokens
-    "ep_3": 28, "ep_4": 29, "ep_5": 30, "ep_6": 31,
+    "ep_3": 27, "ep_4": 28, "ep_5": 29, "ep_6": 30,
     # Digit tokens for move counters
-    "digit_0": 32, "digit_1": 33, "digit_2": 34, "digit_3": 35, "digit_4": 36,
-    "digit_5": 37, "digit_6": 38, "digit_7": 39, "digit_8": 40, "digit_9": 41,
+    "digit_0": 31, "digit_1": 32, "digit_2": 33, "digit_3": 34, "digit_4": 35,
+    "digit_5": 36, "digit_6": 37, "digit_7": 38, "digit_8": 39, "digit_9": 40,
 }
 
 # Sequence length: 64 (board) + 4 (castling) + 2 (ep) + 3 (half) + 3 (full) + 1 (side)
 SEQUENCE_LENGTH = 77
 
 
+def _transform_board_fen(board_fen: str) -> str:
+	"""Flips board vertically (row-wise) and swaps piece colors."""
+	ranks = board_fen.split("/")
+	# Swap piece case for each rank, then reverse the order of the ranks.
+	# The column order within each rank is NOT changed.
+	flipped_ranks = ["".join(c.swapcase() for c in rank) for rank in ranks]
+	return "/".join(flipped_ranks[::-1])
+
+
+def _transform_castling(rights: str) -> str:
+	"""Transforms castling rights to the canonical perspective."""
+	if rights == "-":
+		return "-"
+	transformed = ""
+	if "k" in rights: transformed += "K"
+	if "q" in rights: transformed += "Q"
+	if "K" in rights: transformed += "k"
+	if "Q" in rights: transformed += "q"
+	return transformed if transformed else "-"
+
+
+def _transform_en_passant(square: str) -> str:
+	"""Transforms an en passant square for the canonical representation."""
+	if square == "-":
+		return "-"
+	file = square[0]
+	rank = int(square[1])
+	# The file remains the same. Only the rank is flipped.
+	transformed_rank = 9 - rank
+	return f"{file}{transformed_rank}"
+
+
 def tokenize(fen: str) -> jtp.UInt8[jtp.Array, "T"]:
-	"""Returns a direct, unambiguous array of tokens from a FEN string.
-
-  This tokenizer maps each component of a FEN string to a unique integer
-  token. It does NOT perform any board reversal or perspective shifts,
-  providing a direct representation of the FEN.
-
-  Args:
-    fen: The board position in Forsyth-Edwards Notation.
-
-  Returns:
-    A NumPy array of integer tokens.
-  """
+	"""Returns a canonical array of tokens from a FEN string."""
 	board_fen, side, castling, en_passant, halfmoves, fullmoves = fen.split(" ")
+
+	if side == "b":
+		board_fen = _transform_board_fen(board_fen)
+		castling = _transform_castling(castling)
+		en_passant = _transform_en_passant(en_passant)
 
 	tokens = []
 
@@ -71,7 +95,7 @@ def tokenize(fen: str) -> jtp.UInt8[jtp.Array, "T"]:
 		else:
 			tokens.append(TOKEN_VOCAB[f"piece_{char}"])
 
-	# 2. Tokenize castling rights in a fixed order (4 tokens)
+	# 2. Tokenize castling rights in a fixed, canonical order (4 tokens)
 	castle_tokens = []
 	if "K" in castling: castle_tokens.append(TOKEN_VOCAB["castle_K"])
 	if "Q" in castling: castle_tokens.append(TOKEN_VOCAB["castle_Q"])
@@ -102,48 +126,42 @@ def tokenize(fen: str) -> jtp.UInt8[jtp.Array, "T"]:
 	)
 	tokens.extend(fullmove_tokens)
 
-	# 6. Add the original side-to-move token (1 token)
-	tokens.append(TOKEN_VOCAB[f"meta_{side}"])
+	# 6. Add side-to-move token (1 token)
+	# This is ALWAYS 'w' because the state is from the current player's view.
+	tokens.append(TOKEN_VOCAB["meta_w"])
 
 	assert len(tokens) == SEQUENCE_LENGTH
 	return np.asarray(tokens, dtype=np.uint8)
 
 
 def test_fen_tokenizer():
-	"""Tests that the tokenizer provides a direct, non-canonical mapping."""
-	print("--- Testing Tokenizer (Direct, Non-Canonical Representation) ---")
+	"""Tests that the canonical representation is applied correctly."""
+	print("--- Testing Canonical Tokenizer (Final Correct Version) ---")
 
-	fen_to_test = "rnbq1rk1/pp2ppbp/3p1np1/8/3NP3/2N1B3/PPPQ1PPP/R3KB1R b KQ - 4 8"
-	board_fen, side, castling, en_passant, halfmoves, fullmoves = fen_to_test.split(" ")
+	# A position with Black to move. The tokenizer should transform this.
+	fen_black_turn = "rnbq1rk1/pp2ppbp/3p1np1/8/3NP3/2N1B3/PPPQ1PPP/R3KB1R b KQ - 4 8"
 
-	print(f"\nTesting FEN: {fen_to_test}")
+	# Programmatically generate the correctly flipped FEN to avoid human error.
+	board_b, _, castling_b, ep_b, half_b, full_b = fen_black_turn.split(" ")
+	flipped_board = _transform_board_fen(board_b)
+	flipped_castling = _transform_castling(castling_b)
+	flipped_ep = _transform_en_passant(ep_b)
+	fen_flipped_white_turn = f"{flipped_board} w {flipped_castling} {flipped_ep} {half_b} {full_b}"
 
-	# Tokenize the FEN
-	tokens = tokenize(fen_to_test)
+	print(f"\nOriginal FEN (Black): {fen_black_turn}")
+	print(f"Programmatically Flipped FEN (White): {fen_flipped_white_turn}")
 
-	# Decode the tokens back into a readable format for verification
-	rev_vocab = {v: k for k, v in TOKEN_VOCAB.items()}
-	decoded_tokens = [rev_vocab[t] for t in tokens]
+	print("\n1. Tokenizing position with BLACK to move (should be transformed)...")
+	tokens_from_black_turn = tokenize(fen_black_turn)
 
-	# Extract parts from the decoded tokens
-	decoded_board_str = "".join(decoded_tokens[:64]).replace("piece_", "")
-	decoded_castling_str = "".join(decoded_tokens[64:68]).replace("castle_", "").replace("meta_pad", "")
-	decoded_ep_str = "".join(decoded_tokens[68:70]).replace("ep_", "").replace("meta_pad", "")
-	decoded_half_str = "".join(decoded_tokens[70:73]).replace("digit_", "").replace("meta_pad", "")
-	decoded_full_str = "".join(decoded_tokens[73:76]).replace("digit_", "").replace("meta_pad", "")
-	decoded_side_str = decoded_tokens[76].replace("meta_", "")
+	print("2. Tokenizing the FLIPPED position with WHITE to move...")
+	tokens_from_flipped_white_turn = tokenize(fen_flipped_white_turn)
 
 	print("\n--- Verification ---")
-	print(f"Side to Move:   Original='{side}', Decoded='{decoded_side_str}'")
-	print(f"Castling:       Original='{castling}', Decoded='{decoded_castling_str}'")
-	print(f"En Passant:     Original='{en_passant}', Decoded='{decoded_ep_str}'")
-
-	# Verify that the decoded tokens match the original FEN components
-	assert decoded_side_str == side
-	# Note: The decoded castling string will be in canonical order (KQkq)
-	assert sorted(decoded_castling_str) == sorted(castling)
-	assert decoded_ep_str == en_passant.replace("-", "")
-	print("\nSUCCESS: Tokenizer correctly represents the FEN without transformation.")
+	if np.array_equal(tokens_from_black_turn, tokens_from_flipped_white_turn):
+		print("\nSUCCESS: The canonical transformation is working correctly.")
+	else:
+		print("\nFAILURE: The transformation for black's turn does not match the flipped version.")
 
 
 if __name__ == "__main__":

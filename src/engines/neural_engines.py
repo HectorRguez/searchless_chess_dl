@@ -72,14 +72,21 @@ class ActionValueEngine(NeuralEngine):
 
   def analyse(self, board: chess.Board) -> engine.AnalysisResult:
     """Returns buckets log-probs for each action, and FEN."""
-    # Tokenize the legal actions.
     sorted_legal_moves = engine.get_ordered_legal_moves(board)
-    legal_actions = [utils.MOVE_TO_ACTION[x.uci()] for x in sorted_legal_moves]
+
+    # MODIFIED: Transform moves to canonical perspective if it's black's turn.
+    legal_moves_uci = [move.uci() for move in sorted_legal_moves]
+    if board.turn == chess.BLACK:
+      legal_moves_uci = [
+          utils.transform_uci_move(uci) for uci in legal_moves_uci
+      ]
+    legal_actions = [utils.MOVE_TO_ACTION[uci] for uci in legal_moves_uci]
+
     legal_actions = np.array(legal_actions, dtype=np.int32)
     legal_actions = np.expand_dims(legal_actions, axis=-1)
     # Tokenize the return buckets.
     dummy_return_buckets = np.zeros((len(legal_actions), 1), dtype=np.int32)
-    # Tokenize the board.
+    # Tokenize the board (will be canonical if black's turn).
     tokenized_fen = tokenizer.tokenize(board.fen()).astype(np.int32)
     sequences = np.stack([tokenized_fen] * len(legal_actions))
     # Create the sequences.
@@ -87,10 +94,10 @@ class ActionValueEngine(NeuralEngine):
         [sequences, legal_actions, dummy_return_buckets],
         axis=1,
     )
-    return {'log_probs': self.predict_fn(sequences)[:, -1], 'fen': board.fen()}
+    return {"log_probs": self.predict_fn(sequences)[:, -1], "fen": board.fen()}
 
   def play(self, board: chess.Board) -> chess.Move:
-    return_buckets_log_probs = self.analyse(board)['log_probs']
+    return_buckets_log_probs = self.analyse(board)["log_probs"]
     return_buckets_probs = np.exp(return_buckets_log_probs)
     win_probs = np.inner(return_buckets_probs, self._return_buckets_values)
     _update_scores_with_repetitions(board, win_probs)
@@ -132,17 +139,19 @@ class StateValueEngine(NeuralEngine):
     next_values_log_probs = self._get_value_log_probs(
         self.predict_fn, next_fens
     )
-    # Flip the probabilities of the return buckets as we want to compute -value.
-    next_values_log_probs = np.flip(next_values_log_probs, axis=-1)
+    # MODIFIED: The flip is removed. With a canonical tokenizer, the value of
+    # the next state is already from the opponent's perspective. Flipping it
+    # would be a "double flip" error.
+    # next_values_log_probs = np.flip(next_values_log_probs, axis=-1)
 
     return {
-        'current_log_probs': current_value_log_probs,
-        'next_log_probs': next_values_log_probs,
-        'fen': board.fen(),
+        "current_log_probs": current_value_log_probs,
+        "next_log_probs": next_values_log_probs,
+        "fen": board.fen(),
     }
 
   def play(self, board: chess.Board) -> chess.Move:
-    next_log_probs = self.analyse(board)['next_log_probs']
+    next_log_probs = self.analyse(board)["next_log_probs"]
     next_probs = np.exp(next_log_probs)
     win_probs = np.inner(next_probs, self._return_buckets_values)
     _update_scores_with_repetitions(board, win_probs)
@@ -169,15 +178,22 @@ class BCEngine(NeuralEngine):
 
     # We must renormalize the output distribution to only the legal moves.
     sorted_legal_moves = engine.get_ordered_legal_moves(board)
-    legal_actions = [utils.MOVE_TO_ACTION[x.uci()] for x in sorted_legal_moves]
+    # MODIFIED: Transform moves to canonical perspective if it's black's turn.
+    legal_moves_uci = [move.uci() for move in sorted_legal_moves]
+    if board.turn == chess.BLACK:
+      legal_moves_uci = [
+          utils.transform_uci_move(uci) for uci in legal_moves_uci
+      ]
+    legal_actions = [utils.MOVE_TO_ACTION[uci] for uci in legal_moves_uci]
+
     legal_actions = np.array(legal_actions, dtype=np.int32)
     action_log_probs = total_action_log_probs[legal_actions]
     action_log_probs = jnn.log_softmax(action_log_probs)
     assert len(action_log_probs) == len(list(board.legal_moves))
-    return {'log_probs': action_log_probs, 'fen': board.fen()}
+    return {"log_probs": action_log_probs, "fen": board.fen()}
 
   def play(self, board: chess.Board) -> chess.Move:
-    action_log_probs = self.analyse(board)['log_probs']
+    action_log_probs = self.analyse(board)["log_probs"]
     sorted_legal_moves = engine.get_ordered_legal_moves(board)
     if self.temperature is not None:
       probs = scipy.special.softmax(
@@ -194,13 +210,7 @@ def wrap_predict_fn(
     params: hk.Params,
     batch_size: int = 32,
 ) -> PredictFn:
-  """Returns a simple prediction function from a predictor and parameters.
-
-  Args:
-    predictor: Used to predict outputs.
-    params: Neural network parameters.
-    batch_size: How many sequences to pass to the predictor at once.
-  """
+  """Returns a simple prediction function from a predictor and parameters."""
   jitted_predict_fn = jax.jit(predictor.predict)
 
   def fixed_predict_fn(sequences: np.ndarray) -> np.ndarray:
@@ -228,7 +238,7 @@ def wrap_predict_fn(
 
 
 ENGINE_FROM_POLICY = {
-    'action_value': ActionValueEngine,
-    'state_value': StateValueEngine,
-    'behavioral_cloning': BCEngine,
+    "action_value": ActionValueEngine,
+    "state_value": StateValueEngine,
+    "behavioral_cloning": BCEngine,
 }

@@ -91,7 +91,7 @@ def _build_neural_engine(
   predictor = transformer.build_transformer_predictor(config=predictor_config)
   checkpoint_dir = os.path.join(
       os.getcwd(),
-      f'../checkpoints/{model_name}/action_value_relative_attention_biases/',
+      f'../checkpoints/{model_name}/action_value_new_tokenizer/',
   )
   params = training_utils.load_parameters(
       checkpoint_dir=checkpoint_dir,
