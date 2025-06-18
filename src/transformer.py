@@ -218,14 +218,14 @@ class MultiHeadDotProductAttention(hk.Module):
       # Generate and add dynamic positional attention biases using Smolgen
       supplemental_logits = self._smolgen(inputs_q)
       attention += supplemental_logits
-    else:
-      # Original static positional bias
-      position_bias = hk.get_parameter(
-          "position_bias",
-          shape=(self._num_heads, 77 + 2, 77 + 2),
-          init=hk.initializers.RandomNormal(stddev=0.02),
-      )
-      attention += position_bias[None, :, :, :]
+    # else:
+    #   # Original static positional bias
+    #   position_bias = hk.get_parameter(
+    #       "position_bias",
+    #       shape=(self._num_heads, 77 + 2, 77 + 2),
+    #       init=hk.initializers.RandomNormal(stddev=0.02),
+    #   )
+    #   attention += position_bias[None, :, :, :]
 
     if mask is not None:
       attention = jnp.where(mask, attention, jnp.finfo(jnp.float32).min)

@@ -72,21 +72,14 @@ class ActionValueEngine(NeuralEngine):
 
   def analyse(self, board: chess.Board) -> engine.AnalysisResult:
     """Returns buckets log-probs for each action, and FEN."""
+    # Tokenize the legal actions.
     sorted_legal_moves = engine.get_ordered_legal_moves(board)
-
-    # MODIFIED: Transform moves to canonical perspective if it's black's turn.
-    legal_moves_uci = [move.uci() for move in sorted_legal_moves]
-    if board.turn == chess.BLACK:
-      legal_moves_uci = [
-          utils.transform_uci_move(uci) for uci in legal_moves_uci
-      ]
-    legal_actions = [utils.MOVE_TO_ACTION[uci] for uci in legal_moves_uci]
-
+    legal_actions = [utils.MOVE_TO_ACTION[x.uci()] for x in sorted_legal_moves]
     legal_actions = np.array(legal_actions, dtype=np.int32)
     legal_actions = np.expand_dims(legal_actions, axis=-1)
     # Tokenize the return buckets.
     dummy_return_buckets = np.zeros((len(legal_actions), 1), dtype=np.int32)
-    # Tokenize the board (will be canonical if black's turn).
+    # Tokenize the board.
     tokenized_fen = tokenizer.tokenize(board.fen()).astype(np.int32)
     sequences = np.stack([tokenized_fen] * len(legal_actions))
     # Create the sequences.
@@ -94,10 +87,10 @@ class ActionValueEngine(NeuralEngine):
         [sequences, legal_actions, dummy_return_buckets],
         axis=1,
     )
-    return {"log_probs": self.predict_fn(sequences)[:, -1], "fen": board.fen()}
+    return {'log_probs': self.predict_fn(sequences)[:, -1], 'fen': board.fen()}
 
   def play(self, board: chess.Board) -> chess.Move:
-    return_buckets_log_probs = self.analyse(board)["log_probs"]
+    return_buckets_log_probs = self.analyse(board)['log_probs']
     return_buckets_probs = np.exp(return_buckets_log_probs)
     win_probs = np.inner(return_buckets_probs, self._return_buckets_values)
     _update_scores_with_repetitions(board, win_probs)
@@ -139,19 +132,17 @@ class StateValueEngine(NeuralEngine):
     next_values_log_probs = self._get_value_log_probs(
         self.predict_fn, next_fens
     )
-    # MODIFIED: The flip is removed. With a canonical tokenizer, the value of
-    # the next state is already from the opponent's perspective. Flipping it
-    # would be a "double flip" error.
-    # next_values_log_probs = np.flip(next_values_log_probs, axis=-1)
+    # Flip the probabilities of the return buckets as we want to compute -value.
+    next_values_log_probs = np.flip(next_values_log_probs, axis=-1)
 
     return {
-        "current_log_probs": current_value_log_probs,
-        "next_log_probs": next_values_log_probs,
-        "fen": board.fen(),
+        'current_log_probs': current_value_log_probs,
+        'next_log_probs': next_values_log_probs,
+        'fen': board.fen(),
     }
 
   def play(self, board: chess.Board) -> chess.Move:
-    next_log_probs = self.analyse(board)["next_log_probs"]
+    next_log_probs = self.analyse(board)['next_log_probs']
     next_probs = np.exp(next_log_probs)
     win_probs = np.inner(next_probs, self._return_buckets_values)
     _update_scores_with_repetitions(board, win_probs)
@@ -178,22 +169,15 @@ class BCEngine(NeuralEngine):
 
     # We must renormalize the output distribution to only the legal moves.
     sorted_legal_moves = engine.get_ordered_legal_moves(board)
-    # MODIFIED: Transform moves to canonical perspective if it's black's turn.
-    legal_moves_uci = [move.uci() for move in sorted_legal_moves]
-    if board.turn == chess.BLACK:
-      legal_moves_uci = [
-          utils.transform_uci_move(uci) for uci in legal_moves_uci
-      ]
-    legal_actions = [utils.MOVE_TO_ACTION[uci] for uci in legal_moves_uci]
-
+    legal_actions = [utils.MOVE_TO_ACTION[x.uci()] for x in sorted_legal_moves]
     legal_actions = np.array(legal_actions, dtype=np.int32)
     action_log_probs = total_action_log_probs[legal_actions]
     action_log_probs = jnn.log_softmax(action_log_probs)
     assert len(action_log_probs) == len(list(board.legal_moves))
-    return {"log_probs": action_log_probs, "fen": board.fen()}
+    return {'log_probs': action_log_probs, 'fen': board.fen()}
 
   def play(self, board: chess.Board) -> chess.Move:
-    action_log_probs = self.analyse(board)["log_probs"]
+    action_log_probs = self.analyse(board)['log_probs']
     sorted_legal_moves = engine.get_ordered_legal_moves(board)
     if self.temperature is not None:
       probs = scipy.special.softmax(
@@ -205,40 +189,77 @@ class BCEngine(NeuralEngine):
       return sorted_legal_moves[best_index]
 
 
+
 def wrap_predict_fn(
     predictor: constants.Predictor,
     params: hk.Params,
     batch_size: int = 32,
 ) -> PredictFn:
-  """Returns a simple prediction function from a predictor and parameters."""
-  jitted_predict_fn = jax.jit(predictor.predict)
+    """Returns a simple prediction function from a predictor and parameters."""
+    
+    # Count parameters - updated for newer JAX
+    param_count = sum(x.size for x in jax.tree_util.tree_leaves(params))
+    print(f"📊 Model has {param_count:,} parameters ({param_count/1e6:.2f}M)")
+    
+    jitted_predict_fn = jax.jit(predictor.predict)
+    
+    # Try the staged compilation approach from JAX docs
+    try:
+        # Create dummy input with proper shapes/dtypes
+        dummy_sequences = np.zeros((batch_size, 79), dtype=np.int32)
+        dummy_rng = jax.random.PRNGKey(0)  # Provide actual RNG key
 
-  def fixed_predict_fn(sequences: np.ndarray) -> np.ndarray:
-    """Wrapper around the predictor `predict` function."""
-    assert sequences.shape[0] == batch_size
-    return jitted_predict_fn(
-        params=params,
-        targets=sequences,
-        rng=None,
-    )
+        # Use the staged compilation approach: trace -> lower -> compile -> cost_analysis
+        traced = jax.jit(predictor.predict).trace(params, dummy_rng, dummy_sequences)
+        lowered = traced.lower()
+        compiled = lowered.compile()
+        
+        cost_analysis = compiled.cost_analysis()
+        
+        if cost_analysis is not None and 'flops' in cost_analysis:
+            flops = cost_analysis['flops']
+            flops_per_example = flops / batch_size
+            print(f"🔥 Model FLOPs: {flops:,} total, {flops_per_example:,.0f} per example")
+            
+            # Also show other useful metrics if available
+            if 'bytes accessed' in cost_analysis:
+                bytes_accessed = cost_analysis['bytes accessed']
+                print(f"💾 Memory accessed: {bytes_accessed:,} bytes ({bytes_accessed/1024/1024:.1f} MB)")
+                
+        else:
+            print("⚠️  FLOP analysis not available")
 
-  def predict_fn(sequences: np.ndarray) -> np.ndarray:
-    """Wrapper to collate batches of sequences of fixed size."""
-    remainder = -len(sequences) % batch_size
-    padded = np.pad(sequences, ((0, remainder), (0, 0)))
-    sequences_split = np.split(padded, len(padded) // batch_size)
-    all_outputs = []
-    for sub_sequences in sequences_split:
-      all_outputs.append(fixed_predict_fn(sub_sequences))
-    outputs = np.concatenate(all_outputs, axis=0)
-    assert len(outputs) == len(padded)
-    return outputs[: len(sequences)]  # Crop the padded sequences.
+    except Exception as e:
+        import traceback
+        print(f"⚠️  Could not estimate FLOPs: {e}")
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
 
-  return predict_fn
+    def fixed_predict_fn(sequences: np.ndarray) -> np.ndarray:
+        """Wrapper around the predictor `predict` function."""
+        assert sequences.shape[0] == batch_size
+        return jitted_predict_fn(
+            params=params,
+            targets=sequences,
+            rng=None,
+        )
+
+    def predict_fn(sequences: np.ndarray) -> np.ndarray:
+        """Wrapper to collate batches of sequences of fixed size."""
+        remainder = -len(sequences) % batch_size
+        padded = np.pad(sequences, ((0, remainder), (0, 0)))
+        sequences_split = np.split(padded, len(padded) // batch_size)
+        all_outputs = []
+        for sub_sequences in sequences_split:
+            all_outputs.append(fixed_predict_fn(sub_sequences))
+        outputs = np.concatenate(all_outputs, axis=0)
+        assert len(outputs) == len(padded)
+        return outputs[: len(sequences)]  # Crop the padded sequences.
+
+    return predict_fn
 
 
 ENGINE_FROM_POLICY = {
-    "action_value": ActionValueEngine,
-    "state_value": StateValueEngine,
-    "behavioral_cloning": BCEngine,
+    'action_value': ActionValueEngine,
+    'state_value': StateValueEngine,
+    'behavioral_cloning': BCEngine,
 }
