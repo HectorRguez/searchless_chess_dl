@@ -1,5 +1,11 @@
 # Deep Learning Prject 2: Amortized Planning with Large-Scale Transformers [FORK]
 
+## Poster
+![Poster](figures/poster.png)
+
+
+
+## Amortized Planning with Large-Scale Transformers: A Case Study on Chess
 <p align="center">
   <img src="https://raw.githubusercontent.com/google-deepmind/searchless_chess/master/overview.svg" alt="Overview figure"/>
 </p>
