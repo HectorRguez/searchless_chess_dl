@@ -58,13 +58,13 @@ def main(argv: Sequence[str]) -> None:
       pos_encodings=transformer.PositionalEncodings.LEARNED,
       max_sequence_length=tokenizer.SEQUENCE_LENGTH + 2,
       num_heads=8,
-      num_layers=8,
-      embedding_dim=256,
+      num_layers=9,
+      embedding_dim=320,
+      widening_factor=1.8,
       apply_post_ln=True,
       apply_qk_layernorm=False,
       use_causal_mask=False,
       use_smolgen=False,
-      use_bilinear_attention=True
   )
   train_config = config_lib.TrainConfig(
       learning_rate=1e-4,

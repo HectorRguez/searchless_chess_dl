@@ -57,9 +57,9 @@ def _build_neural_engine(
       num_heads = 8
     case 'local':
       policy = 'action_value'
-      num_layers = 8
-      embedding_dim = 256
-      num_heads = 8
+      num_heads=8
+      num_layers=9
+      embedding_dim=320
     case _:
       raise ValueError(f'Unknown model: {model_name}')
 
@@ -81,11 +81,11 @@ def _build_neural_engine(
       num_heads=num_heads,
       num_layers=num_layers,
       embedding_dim=embedding_dim,
+      widening_factor=1.8,
       apply_post_ln=True,
       apply_qk_layernorm=False,
       use_causal_mask=False,
       use_smolgen=False,
-      use_bilinear_attention=True
   )
 
   predictor = transformer.build_transformer_predictor(config=predictor_config)
