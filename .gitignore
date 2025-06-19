@@ -3,7 +3,7 @@ checkpoints/
 lc0/
 Stockfish/
 *.txt
-*.png
+attention_plots/
 *.json
 training_loss/
 __pycache__/
