@@ -1,10 +1,11 @@
 # Deep Learning Prject 2: Amortized Planning with Large-Scale Transformers [FORK]
 
-The modifications are fully compatible with the original repository. In order to test them, please follow the original tutorial. Some demo model weights are available in the following [link](https://cloud.tsinghua.edu.cn/d/a68ed0d00b8747c3bb69/), and should be saved inside `checkpoints/local/action_value`. Then, select the `local` network for puzzle evaluation.
+The modifications are fully compatible with the original repository. To test them, please follow the original tutorial. Demo model weights with the best tokenizer and an experimental combination of bilinear attention and Smolgen are available in the following [link](https://cloud.tsinghua.edu.cn/d/a68ed0d00b8747c3bb69/), and should be saved directly inside `checkpoints/local/action_value`. Then, select `--agent=local` network for puzzle evaluation (this only requires the puzzle dataset). The local model configuration is in the `engines/constants.py` file, including the attention modification and the checkpoints.
+
+To avoid cluttering the `transformers.py` file with an excessive number of configurable parameters, most of the ablation study experiments are contained in `src/transformers.py` in the `benchmark` branch. 
 
 ## Poster
 ![Poster](figures/poster.png)
-
 
 
 ## Amortized Planning with Large-Scale Transformers: A Case Study on Chess
