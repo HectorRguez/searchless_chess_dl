@@ -1,5 +1,7 @@
 # Deep Learning Prject 2: Amortized Planning with Large-Scale Transformers [FORK]
 
+The modifications are fully compatible with the original repository. In order to test them, please follow the original tutorial. Some demo model weights are available in the following [link](https://cloud.tsinghua.edu.cn/d/a68ed0d00b8747c3bb69/), and should be saved inside `checkpoints/local/action_value`. Then, select the `local` network for puzzle evaluation.
+
 ## Poster
 ![Poster](figures/poster.png)
 
@@ -107,50 +109,6 @@ pip install --upgrade "jax[cuda12_pip]" -f https://storage.googleapis.com/jax-re
 Note that the jax version must correspond to the existing CUDA installation you wish to use (CUDA 12 in the example above).
 Please see the [JAX documentation](https://github.com/jax-ml/jax#installation) for more details.
 
-### Installing Stockfish
-
-Download and compile the latest version of Stockfish (for Unix-like systems):
-
-```bash
-git clone https://github.com/official-stockfish/Stockfish.git
-cd Stockfish/src
-make -j profile-build ARCH=x86-64-avx2
-cd ../..
-```
-
-
-### Installing Leela Chess Zero
-
-Follow the [Lc0 download instructions](https://github.com/LeelaChessZero/lc0?tab=readme-ov-file#downloading-source), i.e.,
-
-```bash
-git clone -b release/0.30 --recurse-submodules https://github.com/LeelaChessZero/lc0.git
-```
-
-Then build the engine as described in the [Lc0 build instructions](https://github.com/LeelaChessZero/lc0?tab=readme-ov-file#building-and-running-lc0).
-
-We evaluate Lc0 with the largest-possible network from [Lc0's model catalogue](https://lczero.org/play/networks/bestnets/), i.e., the `Large` network.
-To download that network, run the following command:
-
-```bash
-cd lc0/build/release
-wget https://storage.lczero.org/files/768x15x24h-t82-swa-7464000.pb.gz
-gzip -d 768x15x24h-t82-swa-7464000.pb.gz
-cd ../../..
-```
-
-### Installing BayesElo
-
-To compute the Elos for the different agents, we require [BayesElo](https://www.remi-coulom.fr/Bayesian-Elo/), which can be installed as follows:
-
-```bash
-wget https://www.remi-coulom.fr/Bayesian-Elo/bayeselo.tar.bz2
-tar -xvjf bayeselo.tar.bz2
-cd BayesElo
-make bayeselo
-cd ..
-```
-
 
 ### Downloading the Datasets
 
@@ -181,7 +139,6 @@ cd checkpoints
 ./download.sh
 cd ..
 ```
-
 
 ## Usage
 
