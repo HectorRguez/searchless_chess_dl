@@ -205,37 +205,135 @@ class BCEngine(NeuralEngine):
       return sorted_legal_moves[best_index]
 
 
+
 def wrap_predict_fn(
     predictor: constants.Predictor,
     params: hk.Params,
     batch_size: int = 32,
 ) -> PredictFn:
-  """Returns a simple prediction function from a predictor and parameters."""
-  jitted_predict_fn = jax.jit(predictor.predict)
+    """Returns a simple prediction function from a predictor and parameters."""
+    
+    # Detailed parameter analysis
+    param_count = sum(x.size for x in jax.tree_util.tree_leaves(params))
+    print(f"📊 Model has {param_count:,} parameters ({param_count/1e6:.2f}M)")
+    
+    # Analyze parameter structure for MoE verification
+    print("\n🔍 Parameter structure analysis:")
+    
+    def analyze_params(params_dict, prefix="", level=0):
+        """Recursively analyze parameter structure."""
+        indent = "  " * level
+        moe_expert_count = 0
+        mlp_count = 0
+        
+        if isinstance(params_dict, dict):
+            for key, value in params_dict.items():
+                full_key = f"{prefix}/{key}" if prefix else key
+                
+                # Check for MoE patterns
+                if "expert" in key.lower():
+                    if isinstance(value, dict):
+                        expert_params = sum(x.size for x in jax.tree_util.tree_leaves(value))
+                        print(f"{indent}🤖 {full_key}: {expert_params:,} params")
+                        moe_expert_count += 1
+                    else:
+                        print(f"{indent}🤖 {full_key}: shape {value.shape}")
+                elif "router" in key.lower():
+                    if hasattr(value, 'shape'):
+                        print(f"{indent}🎯 Router {full_key}: shape {value.shape} ({value.size:,} params)")
+                elif any(mlp_key in key.lower() for mlp_key in ["linear", "dense", "mlp"]):
+                    if hasattr(value, 'shape'):
+                        print(f"{indent}📐 MLP {full_key}: shape {value.shape} ({value.size:,} params)")
+                        mlp_count += 1
+                
+                # Recurse into nested structures
+                sub_moe, sub_mlp = analyze_params(value, full_key, level + 1)
+                moe_expert_count += sub_moe
+                mlp_count += sub_mlp
+        
+        return moe_expert_count, mlp_count
+    
+    moe_experts, mlp_layers = analyze_params(params)
+    
+    # Check for parameter sharing in experts
+    print(f"\n📈 Summary:")
+    print(f"  - Found {moe_experts} expert-related parameter groups")
+    print(f"  - Found {mlp_layers} MLP-related parameters")
+    
+    # Look for duplicate parameter shapes (indicating sharing)
+    all_shapes = []
+    def collect_shapes(params_dict, path=""):
+        if isinstance(params_dict, dict):
+            for key, value in params_dict.items():
+                new_path = f"{path}/{key}" if path else key
+                if hasattr(value, 'shape'):
+                    all_shapes.append((new_path, value.shape, value.size))
+                else:
+                    collect_shapes(value, new_path)
+    
+    collect_shapes(params)
+    
+    # Group by shape to detect potential sharing
+    from collections import defaultdict
+    shape_groups = defaultdict(list)
+    for path, shape, size in all_shapes:
+        if "expert" in path.lower():
+            shape_groups[shape].append((path, size))
+    
+    print(f"\n🔄 Parameter sharing analysis:")
+    for shape, paths in shape_groups.items():
+        if len(paths) > 1:
+            print(f"  Shape {shape}: {len(paths)} instances")
+            for path, size in paths[:3]:  # Show first 3
+                print(f"    - {path} ({size:,} params)")
+            if len(paths) > 3:
+                print(f"    - ... and {len(paths)-3} more")
+    
+    # FLOP analysis (keeping your existing code)
+    jitted_predict_fn = jax.jit(predictor.predict)
+    try:
+        dummy_sequences = np.zeros((batch_size, 79), dtype=np.int32)
+        dummy_rng = jax.random.PRNGKey(0)
+        traced = jax.jit(predictor.predict).trace(params, dummy_rng, dummy_sequences)
+        lowered = traced.lower()
+        compiled = lowered.compile()
+        cost_analysis = compiled.cost_analysis()
+        if cost_analysis is not None and 'flops' in cost_analysis:
+            flops = cost_analysis['flops']
+            flops_per_example = flops / batch_size
+            print(f"\n🔥 Model FLOPs: {flops:,} total, {flops_per_example:,.0f} per example")
+            if 'bytes accessed' in cost_analysis:
+                bytes_accessed = cost_analysis['bytes accessed']
+                print(f"💾 Memory accessed: {bytes_accessed:,} bytes ({bytes_accessed/1024/1024:.1f} MB)")
+        else:
+            print("⚠️ FLOP analysis not available")
+    except Exception as e:
+        import traceback
+        print(f"⚠️ Could not estimate FLOPs: {e}")
+        print(f"🔍 Full traceback: {traceback.format_exc()}")
 
-  def fixed_predict_fn(sequences: np.ndarray) -> np.ndarray:
-    """Wrapper around the predictor `predict` function."""
-    assert sequences.shape[0] == batch_size
-    return jitted_predict_fn(
-        params=params,
-        targets=sequences,
-        rng=None,
-    )
+    def fixed_predict_fn(sequences: np.ndarray) -> np.ndarray:
+        """Wrapper around the predictor `predict` function."""
+        assert sequences.shape[0] == batch_size
+        return jitted_predict_fn(
+            params=params,
+            targets=sequences,
+            rng=None,
+        )
 
-  def predict_fn(sequences: np.ndarray) -> np.ndarray:
-    """Wrapper to collate batches of sequences of fixed size."""
-    remainder = -len(sequences) % batch_size
-    padded = np.pad(sequences, ((0, remainder), (0, 0)))
-    sequences_split = np.split(padded, len(padded) // batch_size)
-    all_outputs = []
-    for sub_sequences in sequences_split:
-      all_outputs.append(fixed_predict_fn(sub_sequences))
-    outputs = np.concatenate(all_outputs, axis=0)
-    assert len(outputs) == len(padded)
-    return outputs[: len(sequences)]  # Crop the padded sequences.
+    def predict_fn(sequences: np.ndarray) -> np.ndarray:
+        """Wrapper to collate batches of sequences of fixed size."""
+        remainder = -len(sequences) % batch_size
+        padded = np.pad(sequences, ((0, remainder), (0, 0)))
+        sequences_split = np.split(padded, len(padded) // batch_size)
+        all_outputs = []
+        for sub_sequences in sequences_split:
+            all_outputs.append(fixed_predict_fn(sub_sequences))
+        outputs = np.concatenate(all_outputs, axis=0)
+        assert len(outputs) == len(padded)
+        return outputs[: len(sequences)]
 
-  return predict_fn
-
+    return predict_fn
 
 ENGINE_FROM_POLICY = {
     "action_value": ActionValueEngine,
